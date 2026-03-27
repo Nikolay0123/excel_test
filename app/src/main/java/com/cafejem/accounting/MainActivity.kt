@@ -1,6 +1,7 @@
 package com.cafejem.accounting
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -55,6 +56,7 @@ import com.cafejem.accounting.data.PaymentType
 import com.cafejem.accounting.export.ExcelExporter
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val viewModel by viewModels<AppViewModel> {
@@ -90,19 +92,24 @@ private fun MainScreen(viewModel: AppViewModel) {
     val tabs = listOf("Гости", "Ввод", "Финансы", "Итоги")
 
     val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        ActivityResultContracts.CreateDocument("application/vnd.ms-excel")
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                exporter.exportMonth(
-                    context = context,
-                    targetUri = uri,
-                    month = month,
-                    summary = summary,
-                    ratesWithoutVat = viewModel.ratesMap(),
-                    expenses = expenses,
-                    finance = finance
-                )
+                try {
+                    exporter.exportMonth(
+                        context = context,
+                        targetUri = uri,
+                        month = month,
+                        summary = summary,
+                        ratesWithoutVat = viewModel.ratesMap(),
+                        expenses = expenses,
+                        finance = finance
+                    )
+                    Toast.makeText(context, "Экспорт завершен", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Ошибка экспорта: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -124,7 +131,11 @@ private fun MainScreen(viewModel: AppViewModel) {
             Spacer(Modifier.height(8.dp))
             when (selectedTab) {
                 0 -> GuestsTab(guests = guests, onAddGuest = viewModel::addGuest)
-                1 -> EntryTab(guests = guests, onAddEntry = viewModel::addEntry)
+                1 -> EntryTab(
+                    guests = guests,
+                    onAddEntry = viewModel::addEntry,
+                    onAddEntriesForRange = viewModel::addEntriesForRange
+                )
                 2 -> FinanceTab(
                     onUpdateRate = viewModel::updateRate,
                     onUpdateSetting = viewModel::updateFinanceSetting,
@@ -132,7 +143,7 @@ private fun MainScreen(viewModel: AppViewModel) {
                     expenses = expenses
                 )
                 else -> SummaryTab(summary = summary, finance = finance, onExport = {
-                    exportLauncher.launch("CafeJem-$month.xlsx")
+                    exportLauncher.launch("CafeJem-$month.xls")
                 })
             }
         }
@@ -153,8 +164,12 @@ private fun MonthSelector(month: String, onChange: (String) -> Unit) {
 private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentType) -> Unit) {
     var name by remember { mutableStateOf("") }
     var room by remember { mutableStateOf("") }
+    var search by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     var payment by remember { mutableStateOf(PaymentType.WITH_VAT) }
+    val filteredGuests = guests.filter {
+        it.name.contains(search.trim(), ignoreCase = true)
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("ФИО/Организация") })
@@ -162,7 +177,7 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
             TextField(
                 modifier = Modifier.menuAnchor(),
-                value = payment.name,
+                value = payment.asLabel(),
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Тип оплаты") },
@@ -170,7 +185,7 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
             )
             androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 PaymentType.entries.forEach {
-                    DropdownMenuItem(text = { Text(it.name) }, onClick = { payment = it; expanded = false })
+                    DropdownMenuItem(text = { Text(it.asLabel()) }, onClick = { payment = it; expanded = false })
                 }
             }
         }
@@ -181,12 +196,21 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
                 room = ""
             }
         }) { Text("Добавить гостя") }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(guests) { guest ->
+        OutlinedTextField(
+            value = search,
+            onValueChange = { search = it },
+            label = { Text("Поиск гостя по фамилии") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        LazyColumn(
+            modifier = Modifier.height(220.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(filteredGuests) { guest ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp)) {
                         Text(guest.name)
-                        Text("${guest.roomOrOrg} | ${guest.paymentType.name}", style = MaterialTheme.typography.bodySmall)
+                        Text("${guest.roomOrOrg} | ${guest.paymentType.asLabel()}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -196,16 +220,31 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EntryTab(guests: List<Guest>, onAddEntry: (Long, Int, MealType, Int) -> Unit) {
+private fun EntryTab(
+    guests: List<Guest>,
+    onAddEntry: (Long, Int, MealType, Int) -> Unit,
+    onAddEntriesForRange: (Long, Int, Int, MealType, Int) -> Unit
+) {
     var selectedGuestId by remember { mutableStateOf<Long?>(null) }
+    var search by remember { mutableStateOf("") }
     var day by remember { mutableStateOf(LocalDate.now().dayOfMonth.toString()) }
+    var startDay by remember { mutableStateOf(LocalDate.now().dayOfMonth.toString()) }
+    var endDay by remember { mutableStateOf(LocalDate.now().dayOfMonth.toString()) }
     var portions by remember { mutableStateOf("1") }
     var meal by remember { mutableStateOf(MealType.BREAKFAST) }
     var guestExpanded by remember { mutableStateOf(false) }
     var mealExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val filteredGuests = guests.filter { it.name.contains(search.trim(), ignoreCase = true) }
     val selectedGuest = guests.firstOrNull { it.id == selectedGuestId }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = search,
+            onValueChange = { search = it },
+            label = { Text("Поиск гостя по фамилии") },
+            modifier = Modifier.fillMaxWidth()
+        )
         ExposedDropdownMenuBox(expanded = guestExpanded, onExpandedChange = { guestExpanded = !guestExpanded }) {
             TextField(
                 modifier = Modifier.menuAnchor(),
@@ -216,7 +255,7 @@ private fun EntryTab(guests: List<Guest>, onAddEntry: (Long, Int, MealType, Int)
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = guestExpanded) }
             )
             androidx.compose.material3.DropdownMenu(expanded = guestExpanded, onDismissRequest = { guestExpanded = false }) {
-                guests.forEach {
+                filteredGuests.forEach {
                     DropdownMenuItem(text = { Text(it.name) }, onClick = { selectedGuestId = it.id; guestExpanded = false })
                 }
             }
@@ -224,7 +263,7 @@ private fun EntryTab(guests: List<Guest>, onAddEntry: (Long, Int, MealType, Int)
         ExposedDropdownMenuBox(expanded = mealExpanded, onExpandedChange = { mealExpanded = !mealExpanded }) {
             TextField(
                 modifier = Modifier.menuAnchor(),
-                value = meal.name,
+                value = meal.asLabel(),
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Прием пищи") },
@@ -232,10 +271,11 @@ private fun EntryTab(guests: List<Guest>, onAddEntry: (Long, Int, MealType, Int)
             )
             androidx.compose.material3.DropdownMenu(expanded = mealExpanded, onDismissRequest = { mealExpanded = false }) {
                 MealType.entries.forEach {
-                    DropdownMenuItem(text = { Text(it.name) }, onClick = { meal = it; mealExpanded = false })
+                    DropdownMenuItem(text = { Text(it.asLabel()) }, onClick = { meal = it; mealExpanded = false })
                 }
             }
         }
+        Text("Добавить на один день")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(value = day, onValueChange = { day = it }, label = { Text("День") })
             OutlinedTextField(value = portions, onValueChange = { portions = it }, label = { Text("Порции") })
@@ -248,6 +288,21 @@ private fun EntryTab(guests: List<Guest>, onAddEntry: (Long, Int, MealType, Int)
                 portions = "1"
             }
         }) { Text("Добавить запись") }
+
+        Text("Добавить за период")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(value = startDay, onValueChange = { startDay = it }, label = { Text("С дня") })
+            OutlinedTextField(value = endDay, onValueChange = { endDay = it }, label = { Text("По день") })
+        }
+        Button(onClick = {
+            val from = startDay.toIntOrNull()
+            val to = endDay.toIntOrNull()
+            val p = portions.toIntOrNull()
+            if (selectedGuestId != null && from != null && to != null && from in 1..31 && to in from..31 && p != null && p > 0) {
+                onAddEntriesForRange(selectedGuestId!!, from, to, meal, p)
+                Toast.makeText(context, "Период добавлен", Toast.LENGTH_SHORT).show()
+            }
+        }) { Text("Добавить за период") }
     }
 }
 
@@ -265,7 +320,7 @@ private fun FinanceTab(
     var tax by remember { mutableStateOf("15") }
     var expenseName by remember { mutableStateOf("") }
     var expenseAmount by remember { mutableStateOf("") }
-    var channel by remember { mutableStateOf("cash") }
+    var channel by remember { mutableStateOf("Наличные") }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Ставки")
@@ -294,20 +349,24 @@ private fun FinanceTab(
         OutlinedTextField(value = expenseName, onValueChange = { expenseName = it }, label = { Text("Статья") })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(value = expenseAmount, onValueChange = { expenseAmount = it }, label = { Text("Сумма") })
-            OutlinedTextField(value = channel, onValueChange = { channel = it }, label = { Text("Канал cash/bank") })
+            OutlinedTextField(value = channel, onValueChange = { channel = it }, label = { Text("Канал: Наличные/Безнал") })
         }
         Button(onClick = {
             val amount = expenseAmount.toDoubleOrNull()
             if (expenseName.isNotBlank() && amount != null) {
-                onAddExpense(expenseName.trim(), if (channel == "bank") "bank" else "cash", amount)
+                val normalized = if (channel.lowercase(Locale.getDefault()).contains("без")) "bank" else "cash"
+                onAddExpense(expenseName.trim(), normalized, amount)
                 expenseName = ""
                 expenseAmount = ""
             }
         }) { Text("Добавить издержку") }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        LazyColumn(
+            modifier = Modifier.height(180.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             items(expenses) {
-                Text("${it.name}: ${it.amount} (${it.paymentChannel})")
+                Text("${it.name}: ${it.amount} (${it.paymentChannel.asPaymentChannelLabel()})")
             }
         }
     }
@@ -328,6 +387,20 @@ private fun SummaryTab(summary: List<GuestSummary>, finance: MonthlyFinance?, on
             Text("Остаток наличных: ${it.cashLeft}")
             Text("Остаток на счете: ${it.bankLeft}")
         }
-        Button(onClick = onExport) { Text("Экспорт в XLSX") }
+        Button(onClick = onExport) { Text("Экспорт в XLS") }
     }
 }
+
+private fun PaymentType.asLabel(): String = when (this) {
+    PaymentType.WITH_VAT -> "С НДС"
+    PaymentType.WITHOUT_VAT -> "Без НДС"
+    PaymentType.CASH -> "Наличные"
+}
+
+private fun MealType.asLabel(): String = when (this) {
+    MealType.BREAKFAST -> "Завтрак"
+    MealType.LUNCH -> "Обед"
+    MealType.DINNER -> "Ужин"
+}
+
+private fun String.asPaymentChannelLabel(): String = if (this == "bank") "Безнал" else "Наличные"

@@ -59,6 +59,6 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
-    implementation("org.apache.poi:poi-ooxml:5.2.5")
+    implementation("net.sourceforge.jexcelapi:jxl:2.6.12")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }

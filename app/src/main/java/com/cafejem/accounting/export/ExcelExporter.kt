@@ -7,7 +7,10 @@ import com.cafejem.accounting.data.MonthlyFinance
 import com.cafejem.accounting.data.GuestSummary
 import com.cafejem.accounting.data.MealType
 import com.cafejem.accounting.data.PaymentType
-import org.apache.poi.xssf.usermodel.XSSFWorkbook
+import jxl.Workbook
+import jxl.write.Label
+import jxl.write.Number
+import jxl.write.WritableSheet
 
 class ExcelExporter {
     fun exportMonth(
@@ -19,58 +22,74 @@ class ExcelExporter {
         expenses: List<MonthlyExpense>,
         finance: MonthlyFinance?
     ) {
-        val wb = XSSFWorkbook()
-        val sheet = wb.createSheet(month)
+        context.contentResolver.openOutputStream(targetUri)?.use { out ->
+            val wb = Workbook.createWorkbook(out)
+            val sheet = wb.createSheet(month, 0)
 
-        val rateB = ratesWithoutVat[MealType.BREAKFAST] ?: 0.0
-        val rateL = ratesWithoutVat[MealType.LUNCH] ?: 0.0
-        val rateD = ratesWithoutVat[MealType.DINNER] ?: 0.0
-        val vatMultiplier = 1.2
+            val rateB = ratesWithoutVat[MealType.BREAKFAST] ?: 0.0
+            val rateL = ratesWithoutVat[MealType.LUNCH] ?: 0.0
+            val rateD = ratesWithoutVat[MealType.DINNER] ?: 0.0
+            val vatMultiplier = 1.2
 
-        val header = sheet.createRow(0)
-        listOf(
-            "Гость/Организация", "Комната/Орг", "Тип оплаты",
-            "Завтраки", "Обеды", "Ужины", "Сумма, руб"
-        ).forEachIndexed { i, value -> header.createCell(i).setCellValue(value) }
-
-        var rowIdx = 1
-        summary.forEach { s ->
-            val row = sheet.createRow(rowIdx++)
-            row.createCell(0).setCellValue(s.guestName)
-            row.createCell(1).setCellValue(s.roomOrOrg)
-            row.createCell(2).setCellValue(
-                when (s.paymentType) {
-                    PaymentType.WITH_VAT -> "Да"
-                    PaymentType.WITHOUT_VAT -> "Нет"
-                    PaymentType.CASH -> "Налич"
-                }
+            val headers = listOf(
+                "Гость/Организация", "Комната/Орг", "Тип оплаты",
+                "Завтраки", "Обеды", "Ужины", "Сумма, руб"
             )
-            row.createCell(3).setCellValue(s.breakfastCount.toDouble())
-            row.createCell(4).setCellValue(s.lunchCount.toDouble())
-            row.createCell(5).setCellValue(s.dinnerCount.toDouble())
+            headers.forEachIndexed { col, value -> sheet.addCell(Label(col, 0, value)) }
 
-            val base = s.breakfastCount * rateB + s.lunchCount * rateL + s.dinnerCount * rateD
-            val total = if (s.paymentType == PaymentType.WITH_VAT) base * vatMultiplier else base
-            row.createCell(6).setCellValue(total)
+            var rowIdx = 1
+            summary.forEach { s ->
+                sheet.addCell(Label(0, rowIdx, s.guestName))
+                sheet.addCell(Label(1, rowIdx, s.roomOrOrg))
+                sheet.addCell(Label(2, rowIdx, paymentLabel(s.paymentType)))
+                sheet.addCell(Number(3, rowIdx, s.breakfastCount.toDouble()))
+                sheet.addCell(Number(4, rowIdx, s.lunchCount.toDouble()))
+                sheet.addCell(Number(5, rowIdx, s.dinnerCount.toDouble()))
+                val base = s.breakfastCount * rateB + s.lunchCount * rateL + s.dinnerCount * rateD
+                val total = if (s.paymentType == PaymentType.WITH_VAT) base * vatMultiplier else base
+                sheet.addCell(Number(6, rowIdx, total))
+                rowIdx++
+            }
+
+            sheet.addCell(Label(0, rowIdx + 1, "ИТОГО"))
+            sheet.addCell(Label(3, rowIdx + 1, summary.sumOf { it.breakfastCount }.toString()))
+            sheet.addCell(Label(4, rowIdx + 1, summary.sumOf { it.lunchCount }.toString()))
+            sheet.addCell(Label(5, rowIdx + 1, summary.sumOf { it.dinnerCount }.toString()))
+            sheet.addCell(Number(6, rowIdx + 1, summary.sumOf {
+                val base = it.breakfastCount * rateB + it.lunchCount * rateL + it.dinnerCount * rateD
+                if (it.paymentType == PaymentType.WITH_VAT) base * vatMultiplier else base
+            }))
+
+            val financeSheet = wb.createSheet("${month}_финансы", 1)
+            writeFinance(
+                sheet = financeSheet,
+                rateB = rateB,
+                rateL = rateL,
+                rateD = rateD,
+                expenses = expenses,
+                finance = finance
+            )
+
+            wb.write()
+            wb.close()
         }
+    }
 
-        val totalRow = sheet.createRow(rowIdx + 1)
-        totalRow.createCell(0).setCellValue("ИТОГО")
-        totalRow.createCell(3).setCellFormula("SUM(D2:D${rowIdx})")
-        totalRow.createCell(4).setCellFormula("SUM(E2:E${rowIdx})")
-        totalRow.createCell(5).setCellFormula("SUM(F2:F${rowIdx})")
-        totalRow.createCell(6).setCellFormula("SUM(G2:G${rowIdx})")
-
-        for (i in 0..6) sheet.autoSizeColumn(i)
-
-        val financeSheet = wb.createSheet("$month-финансы")
-        val financeRows = mutableListOf<Pair<String, String>>(
+    private fun writeFinance(
+        sheet: WritableSheet,
+        rateB: Double,
+        rateL: Double,
+        rateD: Double,
+        expenses: List<MonthlyExpense>,
+        finance: MonthlyFinance?
+    ) {
+        val rows = mutableListOf<Pair<String, String>>(
             "Ставка завтрак (без НДС)" to rateB.toString(),
             "Ставка обед (без НДС)" to rateL.toString(),
             "Ставка ужин (без НДС)" to rateD.toString()
         )
         finance?.let {
-            financeRows += listOf(
+            rows += listOf(
                 "Выручка всего" to it.revenueTotal.toString(),
                 "Выручка с НДС" to it.revenueWithVat.toString(),
                 "Выручка без НДС" to it.revenueWithoutVat.toString(),
@@ -83,29 +102,27 @@ class ExcelExporter {
                 "Остаток на счете" to it.bankLeft.toString()
             )
         }
-
-        financeRows.forEachIndexed { index, pair ->
-            val row = financeSheet.createRow(index)
-            row.createCell(0).setCellValue(pair.first)
-            row.createCell(1).setCellValue(pair.second)
+        rows.forEachIndexed { idx, item ->
+            sheet.addCell(Label(0, idx, item.first))
+            sheet.addCell(Label(1, idx, item.second))
         }
-
-        val expenseStart = financeRows.size + 2
-        val expenseHeader = financeSheet.createRow(expenseStart)
-        expenseHeader.createCell(0).setCellValue("Издержки")
-        expenseHeader.createCell(1).setCellValue("Канал")
-        expenseHeader.createCell(2).setCellValue("Сумма")
+        val start = rows.size + 2
+        sheet.addCell(Label(0, start, "Издержки"))
+        sheet.addCell(Label(1, start, "Канал"))
+        sheet.addCell(Label(2, start, "Сумма"))
         expenses.forEachIndexed { idx, exp ->
-            val row = financeSheet.createRow(expenseStart + 1 + idx)
-            row.createCell(0).setCellValue(exp.name)
-            row.createCell(1).setCellValue(exp.paymentChannel)
-            row.createCell(2).setCellValue(exp.amount)
+            val r = start + 1 + idx
+            sheet.addCell(Label(0, r, exp.name))
+            sheet.addCell(Label(1, r, if (exp.paymentChannel == "cash") "Наличные" else "Безнал"))
+            sheet.addCell(Number(2, r, exp.amount))
         }
-        for (i in 0..2) financeSheet.autoSizeColumn(i)
+    }
 
-        context.contentResolver.openOutputStream(targetUri)?.use { out ->
-            wb.write(out)
+    private fun paymentLabel(paymentType: PaymentType): String {
+        return when (paymentType) {
+            PaymentType.WITH_VAT -> "С НДС"
+            PaymentType.WITHOUT_VAT -> "Без НДС"
+            PaymentType.CASH -> "Наличные"
         }
-        wb.close()
     }
 }

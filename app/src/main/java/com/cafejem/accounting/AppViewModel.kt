@@ -74,6 +74,20 @@ class AppViewModel(
         }
     }
 
+    fun addEntriesForRange(guestId: Long, startDay: Int, endDay: Int, mealType: MealType, portions: Int) {
+        viewModelScope.launch {
+            repository.addEntriesForRange(
+                guestId = guestId,
+                month = currentMonthFlow.value,
+                startDay = startDay,
+                endDay = endDay,
+                mealType = mealType,
+                portions = portions
+            )
+            refreshFinance()
+        }
+    }
+
     suspend fun ratesMap() = repository.ratesMap()
 
     fun addExpense(name: String, paymentChannel: String, amount: Double) {

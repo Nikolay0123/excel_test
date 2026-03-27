@@ -30,6 +30,19 @@ class AccountingRepository(private val dao: AppDao) {
         )
     }
 
+    suspend fun addEntriesForRange(
+        guestId: Long,
+        month: String,
+        startDay: Int,
+        endDay: Int,
+        mealType: MealType,
+        portions: Int
+    ) {
+        for (day in startDay..endDay) {
+            addEntry(guestId = guestId, month = month, day = day, mealType = mealType, portions = portions)
+        }
+    }
+
     suspend fun ensureDefaultRates() {
         if (dao.rates().isNotEmpty()) return
         dao.upsertRate(MealRate(MealType.BREAKFAST, 800.0))
