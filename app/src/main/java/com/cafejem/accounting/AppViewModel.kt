@@ -131,6 +131,13 @@ class AppViewModel(
         }
     }
 
+    fun deleteEntriesForGuestDayMeal(guestId: Long, month: String, day: Int, mealType: MealType) {
+        viewModelScope.launch {
+            repository.deleteEntriesForGuestDayMeal(guestId, month, day, mealType)
+            refreshFinance()
+        }
+    }
+
     suspend fun ratesMap() = repository.ratesMap()
 
     suspend fun financeSettingSnapshot() = repository.financeSetting()

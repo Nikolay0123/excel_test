@@ -24,6 +24,10 @@ class AccountingRepository(private val dao: AppDao) {
         dao.deleteEntry(id)
     }
 
+    suspend fun deleteEntriesForGuestDayMeal(guestId: Long, month: String, day: Int, mealType: MealType) {
+        dao.deleteEntriesForGuestDayMeal(guestId, month, day, mealType)
+    }
+
     suspend fun addEntry(
         guestId: Long,
         month: String,

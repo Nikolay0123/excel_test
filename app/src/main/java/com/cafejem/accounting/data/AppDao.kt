@@ -50,6 +50,9 @@ interface AppDao {
     @Query("DELETE FROM MealEntry WHERE id = :entryId")
     suspend fun deleteEntry(entryId: Long)
 
+    @Query("DELETE FROM MealEntry WHERE guestId = :guestId AND month = :month AND day = :day AND mealType = :mealType")
+    suspend fun deleteEntriesForGuestDayMeal(guestId: Long, month: String, day: Int, mealType: MealType)
+
     @Query("DELETE FROM Guest WHERE id = :guestId")
     suspend fun deleteGuest(guestId: Long)
 }

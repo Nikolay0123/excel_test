@@ -23,15 +23,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -39,7 +37,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,7 +63,6 @@ import com.cafejem.accounting.data.MonthlyFinance
 import com.cafejem.accounting.data.PaymentType
 import com.cafejem.accounting.export.ExcelExporter
 import kotlinx.coroutines.launch
-import java.time.ZoneId
 import java.time.YearMonth
 import java.util.Locale
 
@@ -183,7 +179,8 @@ private fun MainScreen(viewModel: AppViewModel) {
                     month = month,
                     guests = guests,
                     entries = entries,
-                    onDeleteEntry = viewModel::deleteEntry
+                    onDeleteEntry = viewModel::deleteEntry,
+                    onDeleteDayMeal = viewModel::deleteEntriesForGuestDayMeal
                 )
                 else -> SummaryTab(
                     month = month,
@@ -473,39 +470,89 @@ private fun EntryTab(
         }, modifier = Modifier.fillMaxWidth()) { Text("Сохранить выбранные даты") }
 
         if (selectingMeal != null) {
-            val pickerState = rememberDatePickerState(
-                selectableDates = object : SelectableDates {
-                    override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-                        val date = java.time.Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneId.systemDefault()).toLocalDate()
-                        return date.year == yearMonth.year && date.monthValue == yearMonth.monthValue
+            val current = when (selectingMeal) {
+                MealType.BREAKFAST -> breakfastDays
+                MealType.LUNCH -> lunchDays
+                MealType.DINNER -> dinnerDays
+                null -> emptySet()
+            }
+            MultiDayPickerDialog(
+                title = "Выбор дат: ${selectingMeal?.asLabel().orEmpty()}",
+                yearMonth = yearMonth,
+                selectedDays = current,
+                onDismiss = { selectingMeal = null },
+                onConfirm = { updated ->
+                    when (selectingMeal) {
+                        MealType.BREAKFAST -> breakfastDays = updated
+                        MealType.LUNCH -> lunchDays = updated
+                        MealType.DINNER -> dinnerDays = updated
+                        null -> Unit
                     }
+                    selectingMeal = null
                 }
             )
-            DatePickerDialog(
-                onDismissRequest = { selectingMeal = null },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val selectedMillis = pickerState.selectedDateMillis
-                        if (selectedMillis != null) {
-                            val day = java.time.Instant.ofEpochMilli(selectedMillis).atZone(ZoneId.systemDefault()).toLocalDate().dayOfMonth
-                            when (selectingMeal) {
-                                MealType.BREAKFAST -> breakfastDays = breakfastDays + day
-                                MealType.LUNCH -> lunchDays = lunchDays + day
-                                MealType.DINNER -> dinnerDays = dinnerDays + day
-                                null -> Unit
-                            }
-                        }
-                        selectingMeal = null
-                    }) { Text("Выбрать") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { selectingMeal = null }) { Text("Отмена") }
-                }
-            ) {
-                DatePicker(state = pickerState)
-            }
         }
     }
+}
+
+@Composable
+private fun MultiDayPickerDialog(
+    title: String,
+    yearMonth: YearMonth,
+    selectedDays: Set<Int>,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<Int>) -> Unit
+) {
+    var local by remember(selectedDays) { mutableStateOf(selectedDays) }
+    val daysInMonth = yearMonth.lengthOfMonth()
+    val firstDow = yearMonth.atDay(1).dayOfWeek.value // 1..7 (Mon..Sun)
+    val startOffset = (firstDow - 1) // Mon=0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Нажимайте на дни месяца для выбора/снятия.")
+                // 6 недель по 7 дней — достаточно для любого месяца
+                for (week in 0 until 6) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (col in 0 until 7) {
+                            val cell = week * 7 + col
+                            val day = cell - startOffset + 1
+                            if (day < 1 || day > daysInMonth) {
+                                Spacer(Modifier.weight(1f, fill = true))
+                            } else {
+                                val isSelected = local.contains(day)
+                                Button(
+                                    onClick = {
+                                        local = if (isSelected) local - day else local + day
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isSelected)
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        else
+                                            MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = if (isSelected)
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        else
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    modifier = Modifier.weight(1f, fill = true)
+                                ) { Text(day.toString()) }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(local) }) { Text("Готово") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
 }
 
 @Composable
@@ -532,18 +579,36 @@ private fun EntriesManagementTab(
     month: String,
     guests: List<Guest>,
     entries: List<MealEntry>,
-    onDeleteEntry: (Long) -> Unit
+    onDeleteEntry: (Long) -> Unit,
+    onDeleteDayMeal: (Long, String, Int, MealType) -> Unit
 ) {
     var selectedGuestId by remember { mutableStateOf<Long?>(null) }
+    var search by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     val selectedGuest = guests.firstOrNull { it.id == selectedGuestId }
     val guestEntries = entries.filter { it.guestId == selectedGuestId }.sortedByDescending { it.day }
+    val trimmed = search.trim()
+    val filteredGuests = guests.filter { extractSurname(it.name).contains(trimmed, ignoreCase = true) }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Управление записями питания")
+        OutlinedTextField(
+            value = search,
+            onValueChange = { search = it },
+            label = { Text("Поиск гостя по фамилии") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        GuestSuggestions(
+            query = search,
+            guests = guests,
+            onPick = { picked ->
+                selectedGuestId = picked.id
+                search = picked.name
+            }
+        )
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
             TextField(
                 modifier = Modifier.menuAnchor(),
@@ -554,7 +619,7 @@ private fun EntriesManagementTab(
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
             )
             androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                guests.forEach { guest ->
+                filteredGuests.forEach { guest ->
                     DropdownMenuItem(
                         text = { Text("${guest.name} (${guest.roomOrOrg})") },
                         onClick = {
@@ -571,16 +636,39 @@ private fun EntriesManagementTab(
         } else if (guestEntries.isEmpty()) {
             Text("У гостя нет записей за $month")
         } else {
-            guestEntries.forEach { e ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        val dateText = "$month-${e.day.toString().padStart(2, '0')}"
-                        Text("${selectedGuest?.name ?: "Гость"} | ${selectedGuest?.roomOrOrg.orEmpty()}")
-                        Text("$dateText | ${e.mealType.asLabel()} | ${e.portions} порц. | ${e.paymentType.asLabel()}")
-                        Button(onClick = { onDeleteEntry(e.id) }) { Text("Удалить запись") }
-                    }
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("${selectedGuest?.name ?: "Гость"} | Номер: ${selectedGuest?.roomOrOrg.orEmpty()}")
+                    Text("Нажмите на конкретный прием пищи, чтобы удалить")
                 }
             }
+
+            val grouped = guestEntries.groupBy { it.day to it.mealType }
+            grouped.entries
+                .sortedWith(compareBy({ it.key.first }, { it.key.second.name }))
+                .forEach { (key, list) ->
+                    val day = key.first
+                    val mealType = key.second
+                    val dateText = "$month-${day.toString().padStart(2, '0')}"
+                    val totalPortions = list.sumOf { it.portions }
+                    val payment = list.firstOrNull()?.paymentType
+
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("$dateText | ${mealType.asLabel()} x$totalPortions (${payment?.asLabel().orEmpty()})")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    // удалить все записи этого типа питания за день (например "завтрак 27")
+                                    onDeleteDayMeal(selectedGuestId!!, month, day, mealType)
+                                }) { Text("Удалить") }
+                                Button(onClick = {
+                                    // fallback: удалить только последнюю запись, если нужно "точечно"
+                                    list.firstOrNull()?.let { onDeleteEntry(it.id) }
+                                }) { Text("Удалить 1") }
+                            }
+                        }
+                    }
+                }
         }
     }
 }
