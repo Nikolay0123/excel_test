@@ -106,9 +106,9 @@ class AccountingRepository(private val dao: AppDao) {
         val setting = financeSetting()
         val expenseSnapshot = dao.monthExpenses(month)
 
-        // Требование по таблице: для "доп. услуги" применяется НДС 22%.
-        val vatMultiplier = 1.22
-        val vatPercentForMeals = 22.0
+        // Для "доп. услуги" применяется НДС (по настройке).
+        val vatPercentForMeals = setting.vatPercent
+        val vatMultiplier = 1 + (vatPercentForMeals / 100.0)
         fun baseAmount(e: MealEntry): Double {
             val rate = rates[e.mealType] ?: 0.0
             return e.portions * rate

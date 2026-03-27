@@ -105,6 +105,8 @@ class AppViewModel(
 
     suspend fun ratesMap() = repository.ratesMap()
 
+    suspend fun financeSettingSnapshot() = repository.financeSetting()
+
     fun addExpense(name: String, paymentChannel: String, amount: Double) {
         viewModelScope.launch {
             repository.addExpense(currentMonthFlow.value, name, paymentChannel, amount)

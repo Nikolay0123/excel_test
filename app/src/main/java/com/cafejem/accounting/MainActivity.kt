@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -49,6 +50,7 @@ import com.cafejem.accounting.data.AccountingRepository
 import com.cafejem.accounting.data.AppDatabase
 import com.cafejem.accounting.data.Guest
 import com.cafejem.accounting.data.GuestSummary
+import com.cafejem.accounting.data.MealEntry
 import com.cafejem.accounting.data.MealType
 import com.cafejem.accounting.data.MonthlyExpense
 import com.cafejem.accounting.data.MonthlyFinance
@@ -98,6 +100,7 @@ private fun MainScreen(viewModel: AppViewModel) {
         if (uri != null) {
             scope.launch {
                 try {
+                    val vatPercentForMeals = viewModel.financeSettingSnapshot().vatPercent
                     exporter.exportMonth(
                         context = context,
                         targetUri = uri,
@@ -105,7 +108,8 @@ private fun MainScreen(viewModel: AppViewModel) {
                         entries = entries,
                         ratesWithoutVat = viewModel.ratesMap(),
                         expenses = expenses,
-                        finance = finance
+                        finance = finance,
+                        vatPercentForMeals = vatPercentForMeals
                     )
                     Toast.makeText(context, "Экспорт завершен", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
@@ -144,9 +148,16 @@ private fun MainScreen(viewModel: AppViewModel) {
                     onAddExpense = viewModel::addExpense,
                     expenses = expenses
                 )
-                else -> SummaryTab(summary = summary, finance = finance, onExport = {
+                else -> SummaryTab(
+                    month = month,
+                    guests = guests,
+                    entries = entries,
+                    summary = summary,
+                    finance = finance,
+                    onExport = {
                     exportLauncher.launch("CafeJem-$month.xls")
-                })
+                    }
+                )
             }
         }
     }
@@ -301,15 +312,27 @@ private fun EntryTab(
 
         Text("Выбор: питание в цене номера / доп. услуга")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val selectedContainer = MaterialTheme.colorScheme.primaryContainer
+            val unselectedContainer = MaterialTheme.colorScheme.surfaceVariant
+            val selectedContent = MaterialTheme.colorScheme.onPrimaryContainer
+
             Button(
                 onClick = { isExtraService = false },
-                enabled = selectedGuest?.paymentType != PaymentType.CASH
+                enabled = selectedGuest?.paymentType != PaymentType.CASH,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (!isExtraService) selectedContainer else unselectedContainer,
+                    contentColor = if (!isExtraService) selectedContent else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             ) {
                 Text("В цене номера")
             }
             Button(
                 onClick = { isExtraService = true },
-                enabled = selectedGuest?.paymentType != PaymentType.CASH
+                enabled = selectedGuest?.paymentType != PaymentType.CASH,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isExtraService) selectedContainer else unselectedContainer,
+                    contentColor = if (isExtraService) selectedContent else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             ) {
                 Text("Доп. услуга")
             }
@@ -387,21 +410,42 @@ private fun FinanceTab(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Ставки")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = breakfast, onValueChange = { breakfast = it }, label = { Text("Завтрак") })
-            OutlinedTextField(value = lunch, onValueChange = { lunch = it }, label = { Text("Обед") })
-            OutlinedTextField(value = dinner, onValueChange = { dinner = it }, label = { Text("Ужин") })
-        }
+        OutlinedTextField(
+            value = breakfast,
+            onValueChange = { breakfast = it },
+            label = { Text("Завтрак") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = lunch,
+            onValueChange = { lunch = it },
+            label = { Text("Обед") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = dinner,
+            onValueChange = { dinner = it },
+            label = { Text("Ужин") },
+            modifier = Modifier.fillMaxWidth()
+        )
         Button(onClick = {
             breakfast.toDoubleOrNull()?.let { onUpdateRate(MealType.BREAKFAST, it) }
             lunch.toDoubleOrNull()?.let { onUpdateRate(MealType.LUNCH, it) }
             dinner.toDoubleOrNull()?.let { onUpdateRate(MealType.DINNER, it) }
         }) { Text("Сохранить ставки") }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = vat, onValueChange = { vat = it }, label = { Text("НДС %") })
-            OutlinedTextField(value = tax, onValueChange = { tax = it }, label = { Text("Налог %") })
-        }
+        OutlinedTextField(
+            value = vat,
+            onValueChange = { vat = it },
+            label = { Text("НДС %") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = tax,
+            onValueChange = { tax = it },
+            label = { Text("Налог %") },
+            modifier = Modifier.fillMaxWidth()
+        )
         Button(onClick = {
             val v = vat.toDoubleOrNull()
             val t = tax.toDoubleOrNull()
@@ -409,11 +453,24 @@ private fun FinanceTab(
         }) { Text("Сохранить налоги") }
 
         Text("Издержки")
-        OutlinedTextField(value = expenseName, onValueChange = { expenseName = it }, label = { Text("Статья") })
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = expenseAmount, onValueChange = { expenseAmount = it }, label = { Text("Сумма") })
-            OutlinedTextField(value = channel, onValueChange = { channel = it }, label = { Text("Канал: Наличные/Безнал") })
-        }
+        OutlinedTextField(
+            value = expenseName,
+            onValueChange = { expenseName = it },
+            label = { Text("Статья") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = expenseAmount,
+            onValueChange = { expenseAmount = it },
+            label = { Text("Сумма") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = channel,
+            onValueChange = { channel = it },
+            label = { Text("Канал: Наличные/Безнал") },
+            modifier = Modifier.fillMaxWidth()
+        )
         Button(onClick = {
             val amount = expenseAmount.toDoubleOrNull()
             if (expenseName.isNotBlank() && amount != null) {
@@ -431,10 +488,20 @@ private fun FinanceTab(
 }
 
 @Composable
-private fun SummaryTab(summary: List<GuestSummary>, finance: MonthlyFinance?, onExport: () -> Unit) {
+private fun SummaryTab(
+    month: String,
+    guests: List<Guest>,
+    entries: List<MealEntry>,
+    summary: List<GuestSummary>,
+    finance: MonthlyFinance?,
+    onExport: () -> Unit
+) {
     val breakfast = summary.sumOf { it.breakfastCount }
     val lunch = summary.sumOf { it.lunchCount }
     val dinner = summary.sumOf { it.dinnerCount }
+
+    val guestById = remember(guests) { guests.associateBy { it.id } }
+
     Column(
         modifier = Modifier
             .fillMaxWidth(),
@@ -449,6 +516,32 @@ private fun SummaryTab(summary: List<GuestSummary>, finance: MonthlyFinance?, on
             Text("Остаток наличных: ${it.cashLeft}")
             Text("Остаток на счете: ${it.bankLeft}")
         }
+
+        Text("Журнал ввода ($month)")
+        val entriesByDay = remember(entries) { entries.groupBy { it.day } }
+        val daysWithEntries = entriesByDay.keys.sorted()
+        data class JournalKey(
+            val guestId: Long,
+            val mealType: MealType,
+            val paymentType: PaymentType
+        )
+
+        daysWithEntries.forEach { day ->
+            Text("Дата: ${month}-${day.toString().padStart(2, '0')}")
+            val dayEntries = entriesByDay[day].orEmpty()
+
+            val grouped = dayEntries.groupBy { JournalKey(it.guestId, it.mealType, it.paymentType) }
+            grouped.entries
+                .sortedBy { it.key.guestId }
+                .forEach { (key, list) ->
+                    val totalPortions = list.sumOf { it.portions }
+                    val guestName = guestById[key.guestId]?.name ?: "Гость"
+                    Text(
+                        "${guestName}: ${key.mealType.asLabel()} x$totalPortions (${key.paymentType.asLabel()})"
+                    )
+                }
+        }
+
         Button(onClick = onExport) { Text("Экспорт в XLS") }
     }
 }

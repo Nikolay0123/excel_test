@@ -21,7 +21,8 @@ class ExcelExporter {
         entries: List<MealEntry>,
         ratesWithoutVat: Map<MealType, Double>,
         expenses: List<MonthlyExpense>,
-        finance: MonthlyFinance?
+        finance: MonthlyFinance?,
+        vatPercentForMeals: Double
     ) {
         context.contentResolver.openOutputStream(targetUri)?.use { out ->
             val wb = Workbook.createWorkbook(out)
@@ -30,7 +31,7 @@ class ExcelExporter {
             val rateB = ratesWithoutVat[MealType.BREAKFAST] ?: 0.0
             val rateL = ratesWithoutVat[MealType.LUNCH] ?: 0.0
             val rateD = ratesWithoutVat[MealType.DINNER] ?: 0.0
-            val vatMultiplier22 = 1.22
+            val vatMultiplierMeals = 1 + (vatPercentForMeals / 100.0)
             val tax2Rate = 0.02
 
             val yearMonth = YearMonth.parse(month)
@@ -69,7 +70,7 @@ class ExcelExporter {
 
             fun chargedAmount(e: MealEntry): Double {
                 val base = baseAmount(e)
-                return if (e.paymentType == PaymentType.WITH_VAT) base * vatMultiplier22 else base
+                return if (e.paymentType == PaymentType.WITH_VAT) base * vatMultiplierMeals else base
             }
 
             for (day in 1..days) {
@@ -112,7 +113,7 @@ class ExcelExporter {
                 roomAmount += dayRoomBase
                 additionalAmount += dayEntries
                     .filter { it.paymentType == PaymentType.WITH_VAT }
-                    .sumOf { baseAmount(it) } * vatMultiplier22
+                    .sumOf { baseAmount(it) } * vatMultiplierMeals
                 cashAmount += dayEntries
                     .filter { it.paymentType == PaymentType.CASH }
                     .sumOf { baseAmount(it) }
@@ -131,7 +132,7 @@ class ExcelExporter {
             val sectionStart = totalRow + 2
             sheet.addCell(Label(0, sectionStart + 0, "Сумма за питание в цене номера (без НДС)"))
             sheet.addCell(Number(1, sectionStart + 0, roomAmount))
-            sheet.addCell(Label(0, sectionStart + 1, "Сумма за питание как доп. услуга (НДС 22%)"))
+            sheet.addCell(Label(0, sectionStart + 1, "Сумма за питание как доп. услуга (НДС ${vatPercentForMeals}%)"))
             sheet.addCell(Number(1, sectionStart + 1, additionalAmount))
             sheet.addCell(Label(0, sectionStart + 2, "Сумма за питание за наличные"))
             sheet.addCell(Number(1, sectionStart + 2, cashAmount))
