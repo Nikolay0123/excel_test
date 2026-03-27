@@ -16,8 +16,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenuItem
@@ -171,7 +171,12 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
         it.name.contains(search.trim(), ignoreCase = true)
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("ФИО/Организация") })
         OutlinedTextField(value = room, onValueChange = { room = it }, label = { Text("Комната/Описание") })
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
@@ -202,16 +207,16 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
             label = { Text("Поиск гостя по фамилии") },
             modifier = Modifier.fillMaxWidth()
         )
-        LazyColumn(
-            modifier = Modifier.height(220.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            items(filteredGuests) { guest ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(10.dp)) {
-                        Text(guest.name)
-                        Text("${guest.roomOrOrg} | ${guest.paymentType.asLabel()}", style = MaterialTheme.typography.bodySmall)
-                    }
+        GuestSuggestions(
+            query = search,
+            guests = guests,
+            onPick = { picked -> search = picked.name }
+        )
+        filteredGuests.forEach { guest ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(10.dp)) {
+                    Text(guest.name)
+                    Text("${guest.roomOrOrg} | ${guest.paymentType.asLabel()}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -238,12 +243,25 @@ private fun EntryTab(
     val filteredGuests = guests.filter { it.name.contains(search.trim(), ignoreCase = true) }
     val selectedGuest = guests.firstOrNull { it.id == selectedGuestId }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         OutlinedTextField(
             value = search,
             onValueChange = { search = it },
             label = { Text("Поиск гостя по фамилии") },
             modifier = Modifier.fillMaxWidth()
+        )
+        GuestSuggestions(
+            query = search,
+            guests = guests,
+            onPick = { picked ->
+                selectedGuestId = picked.id
+                search = picked.name
+            }
         )
         ExposedDropdownMenuBox(expanded = guestExpanded, onExpandedChange = { guestExpanded = !guestExpanded }) {
             TextField(
@@ -322,7 +340,12 @@ private fun FinanceTab(
     var expenseAmount by remember { mutableStateOf("") }
     var channel by remember { mutableStateOf("Наличные") }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         Text("Ставки")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(value = breakfast, onValueChange = { breakfast = it }, label = { Text("Завтрак") })
@@ -361,13 +384,8 @@ private fun FinanceTab(
             }
         }) { Text("Добавить издержку") }
 
-        LazyColumn(
-            modifier = Modifier.height(180.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            items(expenses) {
-                Text("${it.name}: ${it.amount} (${it.paymentChannel.asPaymentChannelLabel()})")
-            }
+        expenses.forEach {
+            Text("${it.name}: ${it.amount} (${it.paymentChannel.asPaymentChannelLabel()})")
         }
     }
 }
@@ -377,7 +395,12 @@ private fun SummaryTab(summary: List<GuestSummary>, finance: MonthlyFinance?, on
     val breakfast = summary.sumOf { it.breakfastCount }
     val lunch = summary.sumOf { it.lunchCount }
     val dinner = summary.sumOf { it.dinnerCount }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         Text("Завтраков: $breakfast")
         Text("Обедов: $lunch")
         Text("Ужинов: $dinner")
@@ -404,3 +427,31 @@ private fun MealType.asLabel(): String = when (this) {
 }
 
 private fun String.asPaymentChannelLabel(): String = if (this == "bank") "Безнал" else "Наличные"
+
+@Composable
+private fun GuestSuggestions(
+    query: String,
+    guests: List<Guest>,
+    onPick: (Guest) -> Unit
+) {
+    val trimmed = query.trim()
+    if (trimmed.length < 2) return
+    val suggestions = guests
+        .filter { it.name.contains(trimmed, ignoreCase = true) }
+        .take(8)
+    if (suggestions.isEmpty()) return
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Варианты:", style = MaterialTheme.typography.bodySmall)
+            suggestions.forEach { guest ->
+                Button(
+                    onClick = { onPick(guest) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(guest.name)
+                }
+            }
+        }
+    }
+}
