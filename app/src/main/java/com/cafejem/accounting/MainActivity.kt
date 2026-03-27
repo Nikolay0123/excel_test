@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -509,7 +510,7 @@ private fun MultiDayPickerDialog(
     val firstDow = yearMonth.atDay(1).dayOfWeek.value // 1..7 (Mon..Sun)
     val startOffset = (firstDow - 1) // Mon=0
     val weekDays = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
-    val cellSize = 44.dp
+    val cellSize = 36.dp
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -544,18 +545,20 @@ private fun MultiDayPickerDialog(
                                     },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = if (isSelected)
-                                            MaterialTheme.colorScheme.primaryContainer
+                                            MaterialTheme.colorScheme.primary
                                         else
-                                            MaterialTheme.colorScheme.surfaceVariant,
+                                            MaterialTheme.colorScheme.surface,
                                         contentColor = if (isSelected)
-                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                            MaterialTheme.colorScheme.onPrimary
                                         else
-                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                            MaterialTheme.colorScheme.onSurface
                                     ),
-                                    contentPadding = ButtonDefaults.ContentPadding,
+                                    contentPadding = PaddingValues(0.dp),
                                     modifier = Modifier
                                         .size(cellSize)
-                                ) { Text(day.toString()) }
+                                ) {
+                                    Text(day.toString(), style = MaterialTheme.typography.labelSmall)
+                                }
                             }
                         }
                     }
