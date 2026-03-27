@@ -507,6 +507,8 @@ private fun MultiDayPickerDialog(
     val daysInMonth = yearMonth.lengthOfMonth()
     val firstDow = yearMonth.atDay(1).dayOfWeek.value // 1..7 (Mon..Sun)
     val startOffset = (firstDow - 1) // Mon=0
+    val weekDays = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+    val cellSize = 44.dp
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -514,6 +516,17 @@ private fun MultiDayPickerDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Нажимайте на дни месяца для выбора/снятия.")
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    weekDays.forEach { wd ->
+                        Text(
+                            wd,
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .height(cellSize),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
                 // 6 недель по 7 дней — достаточно для любого месяца
                 for (week in 0 until 6) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -521,7 +534,7 @@ private fun MultiDayPickerDialog(
                             val cell = week * 7 + col
                             val day = cell - startOffset + 1
                             if (day < 1 || day > daysInMonth) {
-                                Spacer(Modifier.weight(1f, fill = true))
+                                Spacer(Modifier.height(cellSize).padding(0.dp))
                             } else {
                                 val isSelected = local.contains(day)
                                 Button(
@@ -538,7 +551,9 @@ private fun MultiDayPickerDialog(
                                         else
                                             MaterialTheme.colorScheme.onSurfaceVariant
                                     ),
-                                    modifier = Modifier.weight(1f, fill = true)
+                                    contentPadding = ButtonDefaults.ContentPadding,
+                                    modifier = Modifier
+                                        .height(cellSize)
                                 ) { Text(day.toString()) }
                             }
                         }
