@@ -61,20 +61,34 @@ class AppViewModel(
         }
     }
 
-    fun addEntry(guestId: Long, day: Int, mealType: MealType, portions: Int) {
+    fun addEntry(
+        guestId: Long,
+        day: Int,
+        mealType: MealType,
+        paymentType: PaymentType,
+        portions: Int
+    ) {
         viewModelScope.launch {
             repository.addEntry(
                 guestId = guestId,
                 month = currentMonthFlow.value,
                 day = day,
                 mealType = mealType,
+                paymentType = paymentType,
                 portions = portions
             )
             refreshFinance()
         }
     }
 
-    fun addEntriesForRange(guestId: Long, startDay: Int, endDay: Int, mealType: MealType, portions: Int) {
+    fun addEntriesForRange(
+        guestId: Long,
+        startDay: Int,
+        endDay: Int,
+        mealType: MealType,
+        paymentType: PaymentType,
+        portions: Int
+    ) {
         viewModelScope.launch {
             repository.addEntriesForRange(
                 guestId = guestId,
@@ -82,6 +96,7 @@ class AppViewModel(
                 startDay = startDay,
                 endDay = endDay,
                 mealType = mealType,
+                paymentType = paymentType,
                 portions = portions
             )
             refreshFinance()

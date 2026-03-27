@@ -9,7 +9,7 @@ import androidx.room.TypeConverters
 
 @Database(
     entities = [Guest::class, MealEntry::class, MealRate::class, FinanceSetting::class, MonthlyExpense::class],
-    version = 2
+    version = 3
 )
 @TypeConverters(RoomConverters::class)
 abstract class AppDatabase : RoomDatabase() {

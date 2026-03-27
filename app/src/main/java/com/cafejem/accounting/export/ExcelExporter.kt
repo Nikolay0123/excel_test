@@ -2,63 +2,143 @@ package com.cafejem.accounting.export
 
 import android.content.Context
 import android.net.Uri
+import com.cafejem.accounting.data.MealEntry
+import com.cafejem.accounting.data.MealType
 import com.cafejem.accounting.data.MonthlyExpense
 import com.cafejem.accounting.data.MonthlyFinance
-import com.cafejem.accounting.data.GuestSummary
-import com.cafejem.accounting.data.MealType
 import com.cafejem.accounting.data.PaymentType
 import jxl.Workbook
 import jxl.write.Label
 import jxl.write.Number
 import jxl.write.WritableSheet
+import java.time.YearMonth
 
 class ExcelExporter {
     fun exportMonth(
         context: Context,
         targetUri: Uri,
         month: String,
-        summary: List<GuestSummary>,
+        entries: List<MealEntry>,
         ratesWithoutVat: Map<MealType, Double>,
         expenses: List<MonthlyExpense>,
         finance: MonthlyFinance?
     ) {
         context.contentResolver.openOutputStream(targetUri)?.use { out ->
             val wb = Workbook.createWorkbook(out)
-            val sheet = wb.createSheet(month, 0)
+            val sheet = wb.createSheet("${month}_питание", 0)
 
             val rateB = ratesWithoutVat[MealType.BREAKFAST] ?: 0.0
             val rateL = ratesWithoutVat[MealType.LUNCH] ?: 0.0
             val rateD = ratesWithoutVat[MealType.DINNER] ?: 0.0
-            val vatMultiplier = 1.2
+            val vatMultiplier22 = 1.22
+            val tax2Rate = 0.02
+
+            val yearMonth = YearMonth.parse(month)
+            val days = yearMonth.lengthOfMonth()
+            val entriesByDay = entries.groupBy { it.day }
 
             val headers = listOf(
-                "Гость/Организация", "Комната/Орг", "Тип оплаты",
-                "Завтраки", "Обеды", "Ужины", "Сумма, руб"
+                "День",
+                "Завтраки (кол-во)", "Завтраки (сумма)",
+                "Обеды (кол-во)", "Обеды (сумма)",
+                "Ужины (кол-во)", "Ужины (сумма)",
+                "Налог 2% (цена номера)"
             )
             headers.forEachIndexed { col, value -> sheet.addCell(Label(col, 0, value)) }
 
-            var rowIdx = 1
-            summary.forEach { s ->
-                sheet.addCell(Label(0, rowIdx, s.guestName))
-                sheet.addCell(Label(1, rowIdx, s.roomOrOrg))
-                sheet.addCell(Label(2, rowIdx, paymentLabel(s.paymentType)))
-                sheet.addCell(Number(3, rowIdx, s.breakfastCount.toDouble()))
-                sheet.addCell(Number(4, rowIdx, s.lunchCount.toDouble()))
-                sheet.addCell(Number(5, rowIdx, s.dinnerCount.toDouble()))
-                val base = s.breakfastCount * rateB + s.lunchCount * rateL + s.dinnerCount * rateD
-                val total = if (s.paymentType == PaymentType.WITH_VAT) base * vatMultiplier else base
-                sheet.addCell(Number(6, rowIdx, total))
-                rowIdx++
+            // Totals for the entire month
+            var monthBreakfastCount = 0
+            var monthLunchCount = 0
+            var monthDinnerCount = 0
+            var monthBreakfastSum = 0.0
+            var monthLunchSum = 0.0
+            var monthDinnerSum = 0.0
+
+            var roomAmount = 0.0       // без НДС (paymentType=WITHOUT_VAT)
+            var additionalAmount = 0.0 // с НДС 22% (paymentType=WITH_VAT)
+            var cashAmount = 0.0       // за наличные
+
+            fun baseAmount(e: MealEntry): Double {
+                val rate = when (e.mealType) {
+                    MealType.BREAKFAST -> rateB
+                    MealType.LUNCH -> rateL
+                    MealType.DINNER -> rateD
+                }
+                return e.portions * rate
             }
 
-            sheet.addCell(Label(0, rowIdx + 1, "ИТОГО"))
-            sheet.addCell(Label(3, rowIdx + 1, summary.sumOf { it.breakfastCount }.toString()))
-            sheet.addCell(Label(4, rowIdx + 1, summary.sumOf { it.lunchCount }.toString()))
-            sheet.addCell(Label(5, rowIdx + 1, summary.sumOf { it.dinnerCount }.toString()))
-            sheet.addCell(Number(6, rowIdx + 1, summary.sumOf {
-                val base = it.breakfastCount * rateB + it.lunchCount * rateL + it.dinnerCount * rateD
-                if (it.paymentType == PaymentType.WITH_VAT) base * vatMultiplier else base
-            }))
+            fun chargedAmount(e: MealEntry): Double {
+                val base = baseAmount(e)
+                return if (e.paymentType == PaymentType.WITH_VAT) base * vatMultiplier22 else base
+            }
+
+            for (day in 1..days) {
+                val dayEntries = entriesByDay[day].orEmpty()
+
+                val breakfastEntries = dayEntries.filter { it.mealType == MealType.BREAKFAST }
+                val lunchEntries = dayEntries.filter { it.mealType == MealType.LUNCH }
+                val dinnerEntries = dayEntries.filter { it.mealType == MealType.DINNER }
+
+                val dayBreakfastCount = breakfastEntries.sumOf { it.portions }
+                val dayLunchCount = lunchEntries.sumOf { it.portions }
+                val dayDinnerCount = dinnerEntries.sumOf { it.portions }
+
+                val dayBreakfastSum = breakfastEntries.sumOf { chargedAmount(it) }
+                val dayLunchSum = lunchEntries.sumOf { chargedAmount(it) }
+                val dayDinnerSum = dinnerEntries.sumOf { chargedAmount(it) }
+
+                val dayRoomBase = dayEntries
+                    .filter { it.paymentType == PaymentType.WITHOUT_VAT }
+                    .sumOf { baseAmount(it) }
+                val dayTax2 = dayRoomBase * tax2Rate
+
+                val row = day
+                sheet.addCell(Label(0, row, day.toString()))
+                sheet.addCell(Number(1, row, dayBreakfastCount.toDouble()))
+                sheet.addCell(Number(2, row, dayBreakfastSum))
+                sheet.addCell(Number(3, row, dayLunchCount.toDouble()))
+                sheet.addCell(Number(4, row, dayLunchSum))
+                sheet.addCell(Number(5, row, dayDinnerCount.toDouble()))
+                sheet.addCell(Number(6, row, dayDinnerSum))
+                sheet.addCell(Number(7, row, dayTax2))
+
+                monthBreakfastCount += dayBreakfastCount
+                monthLunchCount += dayLunchCount
+                monthDinnerCount += dayDinnerCount
+                monthBreakfastSum += dayBreakfastSum
+                monthLunchSum += dayLunchSum
+                monthDinnerSum += dayDinnerSum
+
+                roomAmount += dayRoomBase
+                additionalAmount += dayEntries
+                    .filter { it.paymentType == PaymentType.WITH_VAT }
+                    .sumOf { baseAmount(it) } * vatMultiplier22
+                cashAmount += dayEntries
+                    .filter { it.paymentType == PaymentType.CASH }
+                    .sumOf { baseAmount(it) }
+            }
+
+            val totalRow = days + 1
+            sheet.addCell(Label(0, totalRow, "ИТОГО за месяц"))
+            sheet.addCell(Number(1, totalRow, monthBreakfastCount.toDouble()))
+            sheet.addCell(Number(2, totalRow, monthBreakfastSum))
+            sheet.addCell(Number(3, totalRow, monthLunchCount.toDouble()))
+            sheet.addCell(Number(4, totalRow, monthLunchSum))
+            sheet.addCell(Number(5, totalRow, monthDinnerCount.toDouble()))
+            sheet.addCell(Number(6, totalRow, monthDinnerSum))
+            sheet.addCell(Number(7, totalRow, roomAmount * tax2Rate))
+
+            val sectionStart = totalRow + 2
+            sheet.addCell(Label(0, sectionStart + 0, "Сумма за питание в цене номера (без НДС)"))
+            sheet.addCell(Number(1, sectionStart + 0, roomAmount))
+            sheet.addCell(Label(0, sectionStart + 1, "Сумма за питание как доп. услуга (НДС 22%)"))
+            sheet.addCell(Number(1, sectionStart + 1, additionalAmount))
+            sheet.addCell(Label(0, sectionStart + 2, "Сумма за питание за наличные"))
+            sheet.addCell(Number(1, sectionStart + 2, cashAmount))
+            sheet.addCell(Label(0, sectionStart + 3, "Налог 2% (с питания в цене номера)"))
+            sheet.addCell(Number(1, sectionStart + 3, roomAmount * tax2Rate))
+            sheet.addCell(Label(0, sectionStart + 4, "Общая сумма за питание за месяц"))
+            sheet.addCell(Number(1, sectionStart + 4, roomAmount + additionalAmount + cashAmount))
 
             val financeSheet = wb.createSheet("${month}_финансы", 1)
             writeFinance(
@@ -118,11 +198,9 @@ class ExcelExporter {
         }
     }
 
-    private fun paymentLabel(paymentType: PaymentType): String {
-        return when (paymentType) {
-            PaymentType.WITH_VAT -> "С НДС"
-            PaymentType.WITHOUT_VAT -> "Без НДС"
-            PaymentType.CASH -> "Наличные"
-        }
+    private fun paymentLabel(paymentType: PaymentType): String = when (paymentType) {
+        PaymentType.WITH_VAT -> "С НДС"
+        PaymentType.WITHOUT_VAT -> "Без НДС"
+        PaymentType.CASH -> "Наличные"
     }
 }

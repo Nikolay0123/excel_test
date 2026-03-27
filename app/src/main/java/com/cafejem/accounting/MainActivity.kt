@@ -84,6 +84,7 @@ private fun MainScreen(viewModel: AppViewModel) {
     val month by viewModel.currentMonth.collectAsStateWithLifecycle()
     val guests by viewModel.guests.collectAsStateWithLifecycle()
     val summary by viewModel.summary.collectAsStateWithLifecycle()
+    val entries by viewModel.entries.collectAsStateWithLifecycle()
     val expenses by viewModel.expenses.collectAsStateWithLifecycle()
     val finance by viewModel.finance.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -101,7 +102,7 @@ private fun MainScreen(viewModel: AppViewModel) {
                         context = context,
                         targetUri = uri,
                         month = month,
-                        summary = summary,
+                        entries = entries,
                         ratesWithoutVat = viewModel.ratesMap(),
                         expenses = expenses,
                         finance = finance
@@ -118,6 +119,7 @@ private fun MainScreen(viewModel: AppViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(padding)
                 .padding(12.dp)
         ) {
@@ -167,14 +169,14 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
     var search by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     var payment by remember { mutableStateOf(PaymentType.WITH_VAT) }
+    val trimmedQuery = search.trim()
     val filteredGuests = guests.filter {
-        it.name.contains(search.trim(), ignoreCase = true)
+        extractSurname(it.name).contains(trimmedQuery, ignoreCase = true)
     }
 
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+            .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("ФИО/Организация") })
@@ -227,26 +229,35 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
 @Composable
 private fun EntryTab(
     guests: List<Guest>,
-    onAddEntry: (Long, Int, MealType, Int) -> Unit,
-    onAddEntriesForRange: (Long, Int, Int, MealType, Int) -> Unit
+    onAddEntry: (Long, Int, MealType, PaymentType, Int) -> Unit,
+    onAddEntriesForRange: (Long, Int, Int, MealType, PaymentType, Int) -> Unit
 ) {
     var selectedGuestId by remember { mutableStateOf<Long?>(null) }
     var search by remember { mutableStateOf("") }
-    var day by remember { mutableStateOf(LocalDate.now().dayOfMonth.toString()) }
     var startDay by remember { mutableStateOf(LocalDate.now().dayOfMonth.toString()) }
     var endDay by remember { mutableStateOf(LocalDate.now().dayOfMonth.toString()) }
-    var portions by remember { mutableStateOf("1") }
-    var meal by remember { mutableStateOf(MealType.BREAKFAST) }
+    var breakfastPortions by remember { mutableStateOf("") }
+    var lunchPortions by remember { mutableStateOf("") }
+    var dinnerPortions by remember { mutableStateOf("") }
+
+    // false = питание в цене номера (без НДС), true = доп. услуга (НДС 22%)
+    var isExtraService by remember { mutableStateOf(false) }
+
     var guestExpanded by remember { mutableStateOf(false) }
-    var mealExpanded by remember { mutableStateOf(false) }
+
     val context = LocalContext.current
-    val filteredGuests = guests.filter { it.name.contains(search.trim(), ignoreCase = true) }
+    val trimmedQuery = search.trim()
+    val filteredGuests = guests.filter {
+        extractSurname(it.name).contains(trimmedQuery, ignoreCase = true)
+    }
     val selectedGuest = guests.firstOrNull { it.id == selectedGuestId }
+    val paymentTypeForMeals = when (selectedGuest?.paymentType) {
+        PaymentType.CASH -> PaymentType.CASH
+        else -> if (isExtraService) PaymentType.WITH_VAT else PaymentType.WITHOUT_VAT
+    }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         OutlinedTextField(
@@ -263,7 +274,10 @@ private fun EntryTab(
                 search = picked.name
             }
         )
-        ExposedDropdownMenuBox(expanded = guestExpanded, onExpandedChange = { guestExpanded = !guestExpanded }) {
+        ExposedDropdownMenuBox(
+            expanded = guestExpanded,
+            onExpandedChange = { guestExpanded = !guestExpanded }
+        ) {
             TextField(
                 modifier = Modifier.menuAnchor(),
                 value = selectedGuest?.name ?: "Выберите гостя",
@@ -278,47 +292,75 @@ private fun EntryTab(
                 }
             }
         }
-        ExposedDropdownMenuBox(expanded = mealExpanded, onExpandedChange = { mealExpanded = !mealExpanded }) {
-            TextField(
-                modifier = Modifier.menuAnchor(),
-                value = meal.asLabel(),
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Прием пищи") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = mealExpanded) }
-            )
-            androidx.compose.material3.DropdownMenu(expanded = mealExpanded, onDismissRequest = { mealExpanded = false }) {
-                MealType.entries.forEach {
-                    DropdownMenuItem(text = { Text(it.asLabel()) }, onClick = { meal = it; mealExpanded = false })
-                }
-            }
-        }
-        Text("Добавить на один день")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = day, onValueChange = { day = it }, label = { Text("День") })
-            OutlinedTextField(value = portions, onValueChange = { portions = it }, label = { Text("Порции") })
-        }
-        Button(onClick = {
-            val d = day.toIntOrNull()
-            val p = portions.toIntOrNull()
-            if (selectedGuestId != null && d != null && d in 1..31 && p != null && p > 0) {
-                onAddEntry(selectedGuestId!!, d, meal, p)
-                portions = "1"
-            }
-        }) { Text("Добавить запись") }
 
-        Text("Добавить за период")
+        Text("Добавить питание за период")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(value = startDay, onValueChange = { startDay = it }, label = { Text("С дня") })
             OutlinedTextField(value = endDay, onValueChange = { endDay = it }, label = { Text("По день") })
         }
+
+        Text("Выбор: питание в цене номера / доп. услуга")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { isExtraService = false },
+                enabled = selectedGuest?.paymentType != PaymentType.CASH
+            ) {
+                Text("В цене номера")
+            }
+            Button(
+                onClick = { isExtraService = true },
+                enabled = selectedGuest?.paymentType != PaymentType.CASH
+            ) {
+                Text("Доп. услуга")
+            }
+        }
+
+        OutlinedTextField(
+            value = breakfastPortions,
+            onValueChange = { breakfastPortions = it },
+            label = { Text("Завтрак (порции, пусто=не нужно)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = lunchPortions,
+            onValueChange = { lunchPortions = it },
+            label = { Text("Обед (порции, пусто=не нужно)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = dinnerPortions,
+            onValueChange = { dinnerPortions = it },
+            label = { Text("Ужин (порции, пусто=не нужно)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
         Button(onClick = {
             val from = startDay.toIntOrNull()
             val to = endDay.toIntOrNull()
-            val p = portions.toIntOrNull()
-            if (selectedGuestId != null && from != null && to != null && from in 1..31 && to in from..31 && p != null && p > 0) {
-                onAddEntriesForRange(selectedGuestId!!, from, to, meal, p)
-                Toast.makeText(context, "Период добавлен", Toast.LENGTH_SHORT).show()
+            val b = breakfastPortions.toIntOrNull()
+            val l = lunchPortions.toIntOrNull()
+            val d = dinnerPortions.toIntOrNull()
+
+            if (selectedGuestId != null && from != null && to != null && from in 1..31 && to in from..31) {
+                var addedAny = false
+                if (b != null && b > 0) {
+                    onAddEntriesForRange(selectedGuestId!!, from, to, MealType.BREAKFAST, paymentTypeForMeals, b)
+                    addedAny = true
+                }
+                if (l != null && l > 0) {
+                    onAddEntriesForRange(selectedGuestId!!, from, to, MealType.LUNCH, paymentTypeForMeals, l)
+                    addedAny = true
+                }
+                if (d != null && d > 0) {
+                    onAddEntriesForRange(selectedGuestId!!, from, to, MealType.DINNER, paymentTypeForMeals, d)
+                    addedAny = true
+                }
+                if (addedAny) {
+                    Toast.makeText(context, "Период добавлен", Toast.LENGTH_SHORT).show()
+                    breakfastPortions = ""
+                    lunchPortions = ""
+                    dinnerPortions = ""
+                }
             }
         }) { Text("Добавить за период") }
     }
@@ -341,9 +383,7 @@ private fun FinanceTab(
     var channel by remember { mutableStateOf("Наличные") }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Ставки")
@@ -397,8 +437,7 @@ private fun SummaryTab(summary: List<GuestSummary>, finance: MonthlyFinance?, on
     val dinner = summary.sumOf { it.dinnerCount }
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+            .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Завтраков: $breakfast")
@@ -435,9 +474,9 @@ private fun GuestSuggestions(
     onPick: (Guest) -> Unit
 ) {
     val trimmed = query.trim()
-    if (trimmed.length < 2) return
+    if (trimmed.isEmpty()) return
     val suggestions = guests
-        .filter { it.name.contains(trimmed, ignoreCase = true) }
+        .filter { extractSurname(it.name).contains(trimmed, ignoreCase = true) }
         .take(8)
     if (suggestions.isEmpty()) return
 
@@ -454,4 +493,9 @@ private fun GuestSuggestions(
             }
         }
     }
+}
+
+private fun extractSurname(fullName: String): String {
+    val first = fullName.trim().split(Regex("\\s+")).firstOrNull() ?: ""
+    return first
 }

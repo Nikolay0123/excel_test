@@ -33,6 +33,7 @@ data class MealEntry(
     val month: String, // YYYY-MM
     val day: Int,
     val mealType: MealType,
+    val paymentType: PaymentType,
     val portions: Int = 1
 )
 
@@ -45,7 +46,7 @@ data class MealRate(
 @Entity
 data class FinanceSetting(
     @PrimaryKey val id: Int = 1,
-    val vatPercent: Double = 20.0,
+    val vatPercent: Double = 22.0,
     val taxPercent: Double = 15.0
 )
 

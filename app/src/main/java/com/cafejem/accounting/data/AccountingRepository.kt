@@ -17,6 +17,7 @@ class AccountingRepository(private val dao: AppDao) {
         month: String,
         day: Int,
         mealType: MealType,
+        paymentType: PaymentType,
         portions: Int
     ) {
         dao.addEntry(
@@ -25,6 +26,7 @@ class AccountingRepository(private val dao: AppDao) {
                 month = month,
                 day = day,
                 mealType = mealType,
+                paymentType = paymentType,
                 portions = portions
             )
         )
@@ -36,10 +38,18 @@ class AccountingRepository(private val dao: AppDao) {
         startDay: Int,
         endDay: Int,
         mealType: MealType,
+        paymentType: PaymentType,
         portions: Int
     ) {
         for (day in startDay..endDay) {
-            addEntry(guestId = guestId, month = month, day = day, mealType = mealType, portions = portions)
+            addEntry(
+                guestId = guestId,
+                month = month,
+                day = day,
+                mealType = mealType,
+                paymentType = paymentType,
+                portions = portions
+            )
         }
     }
 
@@ -91,39 +101,35 @@ class AccountingRepository(private val dao: AppDao) {
         }
 
     suspend fun calculateFinance(month: String): MonthlyFinance {
-        val guests = dao.guests()
         val entries = dao.monthEntries(month)
-        val grouped = entries.groupBy { it.guestId }
-        val summarySnapshot = guests.map { guest ->
-            val list = grouped[guest.id].orEmpty()
-            GuestSummary(
-                guestId = guest.id,
-                guestName = guest.name,
-                roomOrOrg = guest.roomOrOrg,
-                paymentType = guest.paymentType,
-                breakfastCount = list.filter { it.mealType == MealType.BREAKFAST }.sumOf { it.portions },
-                lunchCount = list.filter { it.mealType == MealType.LUNCH }.sumOf { it.portions },
-                dinnerCount = list.filter { it.mealType == MealType.DINNER }.sumOf { it.portions }
-            )
-        }
         val rates = ratesMap()
         val setting = financeSetting()
         val expenseSnapshot = dao.monthExpenses(month)
 
-        val vatMultiplier = 1 + (setting.vatPercent / 100.0)
-        val withVat = summarySnapshot.filter { it.paymentType == PaymentType.WITH_VAT }
-            .sumOf { it.amount(rates, vatMultiplier) }
-        val withoutVat = summarySnapshot.filter { it.paymentType == PaymentType.WITHOUT_VAT }
-            .sumOf { it.amount(rates, vatMultiplier) }
-        val cash = summarySnapshot.filter { it.paymentType == PaymentType.CASH }
-            .sumOf { it.amount(rates, vatMultiplier) }
+        // Требование по таблице: для "доп. услуги" применяется НДС 22%.
+        val vatMultiplier = 1.22
+        val vatPercentForMeals = 22.0
+        fun baseAmount(e: MealEntry): Double {
+            val rate = rates[e.mealType] ?: 0.0
+            return e.portions * rate
+        }
+
+        val withVat = entries.filter { it.paymentType == PaymentType.WITH_VAT }.sumOf { e ->
+            baseAmount(e) * vatMultiplier
+        }
+        val withoutVat = entries.filter { it.paymentType == PaymentType.WITHOUT_VAT }.sumOf { e ->
+            baseAmount(e)
+        }
+        val cash = entries.filter { it.paymentType == PaymentType.CASH }.sumOf { e ->
+            baseAmount(e)
+        }
         val revenueTotal = withVat + withoutVat + cash
 
         val expenseTotal = expenseSnapshot.sumOf { it.amount }
         val expenseCash = expenseSnapshot.filter { it.paymentChannel == "cash" }.sumOf { it.amount }
         val expenseBank = expenseSnapshot.filter { it.paymentChannel == "bank" }.sumOf { it.amount }
 
-        val vatTax = if (withVat > 0) (withVat / vatMultiplier) * (setting.vatPercent / 100.0) else 0.0
+        val vatTax = if (withVat > 0) (withVat / vatMultiplier) * (vatPercentForMeals / 100.0) else 0.0
         val incomeTax = (revenueTotal - vatTax) * (setting.taxPercent / 100.0)
         val profit = revenueTotal - expenseTotal - vatTax - incomeTax
         val cashLeft = cash - expenseCash
