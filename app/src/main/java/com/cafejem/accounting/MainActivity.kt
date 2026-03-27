@@ -23,18 +23,23 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,7 +66,8 @@ import com.cafejem.accounting.data.MonthlyFinance
 import com.cafejem.accounting.data.PaymentType
 import com.cafejem.accounting.export.ExcelExporter
 import kotlinx.coroutines.launch
-import java.time.LocalDate
+import java.time.ZoneId
+import java.time.YearMonth
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -99,7 +105,7 @@ private fun MainScreen(viewModel: AppViewModel) {
     val scope = rememberCoroutineScope()
     val exporter = remember { ExcelExporter() }
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Гости", "Ввод", "Финансы", "Итоги")
+    val tabs = listOf("Гости", "Ввод", "Финансы", "Записи", "Итоги")
 
     LaunchedEffect(Unit) {
         val persistedMonth = prefs.getString("selected_month", null)
@@ -161,9 +167,9 @@ private fun MainScreen(viewModel: AppViewModel) {
                     onDeleteGuest = viewModel::deleteGuest
                 )
                 1 -> EntryTab(
+                    month = month,
                     guests = guests,
-                    onAddEntry = viewModel::addEntry,
-                    onAddEntriesForRange = viewModel::addEntriesForRange
+                    onAddEntry = viewModel::addEntry
                 )
                 2 -> FinanceTab(
                     onUpdateRate = viewModel::updateRate,
@@ -172,6 +178,12 @@ private fun MainScreen(viewModel: AppViewModel) {
                     expenses = expenses,
                     rates = rates,
                     financeSetting = financeSetting
+                )
+                3 -> EntriesManagementTab(
+                    month = month,
+                    guests = guests,
+                    entries = entries,
+                    onDeleteEntry = viewModel::deleteEntry
                 )
                 else -> SummaryTab(
                     month = month,
@@ -313,20 +325,19 @@ private fun GuestsTab(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EntryTab(
+    month: String,
     guests: List<Guest>,
-    onAddEntry: (Long, Int, MealType, PaymentType, Int) -> Unit,
-    onAddEntriesForRange: (Long, Int, Int, MealType, PaymentType, Int) -> Unit
+    onAddEntry: (Long, Int, MealType, PaymentType, Int) -> Unit
 ) {
     var selectedGuestId by remember { mutableStateOf<Long?>(null) }
     var search by remember { mutableStateOf("") }
-    var startDay by remember { mutableStateOf(LocalDate.now().dayOfMonth.toString()) }
-    var endDay by remember { mutableStateOf(LocalDate.now().dayOfMonth.toString()) }
-    var breakfastPortions by remember { mutableStateOf("") }
-    var lunchPortions by remember { mutableStateOf("") }
-    var dinnerPortions by remember { mutableStateOf("") }
+    var breakfastDays by remember { mutableStateOf(setOf<Int>()) }
+    var lunchDays by remember { mutableStateOf(setOf<Int>()) }
+    var dinnerDays by remember { mutableStateOf(setOf<Int>()) }
 
-    // false = питание в цене номера (без НДС), true = доп. услуга (НДС 22%)
+    // false = питание в цене номера, true = доп. услуга
     var isExtraService by remember { mutableStateOf(false) }
+    var selectingMeal by remember { mutableStateOf<MealType?>(null) }
 
     var guestExpanded by remember { mutableStateOf(false) }
 
@@ -336,6 +347,13 @@ private fun EntryTab(
         extractSurname(it.name).contains(trimmedQuery, ignoreCase = true)
     }
     val selectedGuest = guests.firstOrNull { it.id == selectedGuestId }
+    val yearMonth = YearMonth.parse(month)
+
+    val isWithoutVatGuest = selectedGuest?.paymentType == PaymentType.WITHOUT_VAT
+    if (isWithoutVatGuest && isExtraService) {
+        isExtraService = false
+    }
+
     val paymentTypeForMeals = when (selectedGuest?.paymentType) {
         PaymentType.CASH -> PaymentType.CASH
         else -> if (isExtraService) PaymentType.WITH_VAT else PaymentType.WITHOUT_VAT
@@ -378,22 +396,31 @@ private fun EntryTab(
             }
         }
 
-        Text("Добавить питание за период")
-        OutlinedTextField(
-            value = startDay,
-            onValueChange = { startDay = it },
-            label = { Text("С дня") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = endDay,
-            onValueChange = { endDay = it },
-            label = { Text("По день") },
-            modifier = Modifier.fillMaxWidth()
-        )
+        Text("Выберите даты через календарь")
+        Button(onClick = { selectingMeal = MealType.BREAKFAST }, modifier = Modifier.fillMaxWidth()) {
+            Text("Завтрак: выбрано дат ${breakfastDays.size}")
+        }
+        SelectedDaysRow(days = breakfastDays) { day ->
+            breakfastDays = breakfastDays - day
+        }
+        Button(onClick = { selectingMeal = MealType.LUNCH }, modifier = Modifier.fillMaxWidth()) {
+            Text("Обед: выбрано дат ${lunchDays.size}")
+        }
+        SelectedDaysRow(days = lunchDays) { day ->
+            lunchDays = lunchDays - day
+        }
+        Button(onClick = { selectingMeal = MealType.DINNER }, modifier = Modifier.fillMaxWidth()) {
+            Text("Ужин: выбрано дат ${dinnerDays.size}")
+        }
+        SelectedDaysRow(days = dinnerDays) { day ->
+            dinnerDays = dinnerDays - day
+        }
 
         Text("Выбор: питание в цене номера / доп. услуга")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (isWithoutVatGuest) {
+            Text("Для гостя с типом оплаты 'Без НДС' питание автоматически в цене номера")
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val selectedContainer = MaterialTheme.colorScheme.primaryContainer
             val unselectedContainer = MaterialTheme.colorScheme.surfaceVariant
             val selectedContent = MaterialTheme.colorScheme.onPrimaryContainer
@@ -419,55 +446,142 @@ private fun EntryTab(
                 Text("Доп. услуга")
             }
         }
-
-        OutlinedTextField(
-            value = breakfastPortions,
-            onValueChange = { breakfastPortions = it },
-            label = { Text("Завтрак (порции, пусто=не нужно)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = lunchPortions,
-            onValueChange = { lunchPortions = it },
-            label = { Text("Обед (порции, пусто=не нужно)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = dinnerPortions,
-            onValueChange = { dinnerPortions = it },
-            label = { Text("Ужин (порции, пусто=не нужно)") },
-            modifier = Modifier.fillMaxWidth()
-        )
+        }
 
         Button(onClick = {
-            val from = startDay.toIntOrNull()
-            val to = endDay.toIntOrNull()
-            val b = breakfastPortions.toIntOrNull()
-            val l = lunchPortions.toIntOrNull()
-            val d = dinnerPortions.toIntOrNull()
-
-            if (selectedGuestId != null && from != null && to != null && from in 1..31 && to in from..31) {
+            if (selectedGuestId != null) {
                 var addedAny = false
-                if (b != null && b > 0) {
-                    onAddEntriesForRange(selectedGuestId!!, from, to, MealType.BREAKFAST, paymentTypeForMeals, b)
+                breakfastDays.sorted().forEach { day ->
+                    onAddEntry(selectedGuestId!!, day, MealType.BREAKFAST, paymentTypeForMeals, 1)
                     addedAny = true
                 }
-                if (l != null && l > 0) {
-                    onAddEntriesForRange(selectedGuestId!!, from, to, MealType.LUNCH, paymentTypeForMeals, l)
+                lunchDays.sorted().forEach { day ->
+                    onAddEntry(selectedGuestId!!, day, MealType.LUNCH, paymentTypeForMeals, 1)
                     addedAny = true
                 }
-                if (d != null && d > 0) {
-                    onAddEntriesForRange(selectedGuestId!!, from, to, MealType.DINNER, paymentTypeForMeals, d)
+                dinnerDays.sorted().forEach { day ->
+                    onAddEntry(selectedGuestId!!, day, MealType.DINNER, paymentTypeForMeals, 1)
                     addedAny = true
                 }
                 if (addedAny) {
-                    Toast.makeText(context, "Период добавлен", Toast.LENGTH_SHORT).show()
-                    breakfastPortions = ""
-                    lunchPortions = ""
-                    dinnerPortions = ""
+                    Toast.makeText(context, "Записи добавлены", Toast.LENGTH_SHORT).show()
+                    breakfastDays = emptySet()
+                    lunchDays = emptySet()
+                    dinnerDays = emptySet()
                 }
             }
-        }) { Text("Добавить за период") }
+        }, modifier = Modifier.fillMaxWidth()) { Text("Сохранить выбранные даты") }
+
+        if (selectingMeal != null) {
+            val pickerState = rememberDatePickerState(
+                selectableDates = object : SelectableDates {
+                    override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                        val date = java.time.Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+                        return date.year == yearMonth.year && date.monthValue == yearMonth.monthValue
+                    }
+                }
+            )
+            DatePickerDialog(
+                onDismissRequest = { selectingMeal = null },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val selectedMillis = pickerState.selectedDateMillis
+                        if (selectedMillis != null) {
+                            val day = java.time.Instant.ofEpochMilli(selectedMillis).atZone(ZoneId.systemDefault()).toLocalDate().dayOfMonth
+                            when (selectingMeal) {
+                                MealType.BREAKFAST -> breakfastDays = breakfastDays + day
+                                MealType.LUNCH -> lunchDays = lunchDays + day
+                                MealType.DINNER -> dinnerDays = dinnerDays + day
+                                null -> Unit
+                            }
+                        }
+                        selectingMeal = null
+                    }) { Text("Выбрать") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { selectingMeal = null }) { Text("Отмена") }
+                }
+            ) {
+                DatePicker(state = pickerState)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelectedDaysRow(days: Set<Int>, onRemove: (Int) -> Unit) {
+    if (days.isEmpty()) return
+    val text = days.sorted().joinToString(", ")
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Выбраны дни: $text")
+            Text("Нажмите, чтобы убрать день")
+            days.sorted().forEach { day ->
+                Text(
+                    text = "День $day",
+                    modifier = Modifier.clickable { onRemove(day) }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EntriesManagementTab(
+    month: String,
+    guests: List<Guest>,
+    entries: List<MealEntry>,
+    onDeleteEntry: (Long) -> Unit
+) {
+    var selectedGuestId by remember { mutableStateOf<Long?>(null) }
+    var expanded by remember { mutableStateOf(false) }
+    val selectedGuest = guests.firstOrNull { it.id == selectedGuestId }
+    val guestEntries = entries.filter { it.guestId == selectedGuestId }.sortedByDescending { it.day }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("Управление записями питания")
+        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+            TextField(
+                modifier = Modifier.menuAnchor(),
+                value = selectedGuest?.name ?: "Выберите гостя",
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Гость") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
+            )
+            androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                guests.forEach { guest ->
+                    DropdownMenuItem(
+                        text = { Text("${guest.name} (${guest.roomOrOrg})") },
+                        onClick = {
+                            selectedGuestId = guest.id
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        if (selectedGuestId == null) {
+            Text("Сначала выберите гостя")
+        } else if (guestEntries.isEmpty()) {
+            Text("У гостя нет записей за $month")
+        } else {
+            guestEntries.forEach { e ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val dateText = "$month-${e.day.toString().padStart(2, '0')}"
+                        Text("${selectedGuest?.name ?: "Гость"} | ${selectedGuest?.roomOrOrg.orEmpty()}")
+                        Text("$dateText | ${e.mealType.asLabel()} | ${e.portions} порц. | ${e.paymentType.asLabel()}")
+                        Button(onClick = { onDeleteEntry(e.id) }) { Text("Удалить запись") }
+                    }
+                }
+            }
+        }
     }
 }
 

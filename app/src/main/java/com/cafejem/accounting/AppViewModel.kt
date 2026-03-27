@@ -124,6 +124,13 @@ class AppViewModel(
         }
     }
 
+    fun deleteEntry(id: Long) {
+        viewModelScope.launch {
+            repository.deleteEntry(id)
+            refreshFinance()
+        }
+    }
+
     suspend fun ratesMap() = repository.ratesMap()
 
     suspend fun financeSettingSnapshot() = repository.financeSetting()
