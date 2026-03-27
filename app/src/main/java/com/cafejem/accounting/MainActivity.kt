@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -522,19 +523,19 @@ private fun MultiDayPickerDialog(
                             wd,
                             modifier = Modifier
                                 .padding(top = 2.dp)
-                                .height(cellSize),
+                                .size(cellSize),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
                 // 6 недель по 7 дней — достаточно для любого месяца
                 for (week in 0 until 6) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         for (col in 0 until 7) {
                             val cell = week * 7 + col
                             val day = cell - startOffset + 1
                             if (day < 1 || day > daysInMonth) {
-                                Spacer(Modifier.height(cellSize).padding(0.dp))
+                                Spacer(Modifier.size(cellSize))
                             } else {
                                 val isSelected = local.contains(day)
                                 Button(
@@ -553,7 +554,7 @@ private fun MultiDayPickerDialog(
                                     ),
                                     contentPadding = ButtonDefaults.ContentPadding,
                                     modifier = Modifier
-                                        .height(cellSize)
+                                        .size(cellSize)
                                 ) { Text(day.toString()) }
                             }
                         }
