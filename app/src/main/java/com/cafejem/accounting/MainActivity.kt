@@ -122,6 +122,7 @@ private fun MainScreen(viewModel: AppViewModel) {
                         context = context,
                         targetUri = uri,
                         month = month,
+                        guests = guests,
                         entries = entries,
                         ratesWithoutVat = viewModel.ratesMap(),
                         expenses = expenses,
@@ -190,9 +191,17 @@ private fun MainScreen(viewModel: AppViewModel) {
 @Composable
 private fun MonthSelector(month: String, onChange: (String) -> Unit) {
     var value by remember(month) { mutableStateOf(month) }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text("Месяц YYYY-MM") })
-        Button(onClick = { onChange(value) }) { Text("Применить") }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { value = it },
+            label = { Text("Месяц YYYY-MM") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            onClick = { onChange(value) },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Применить") }
     }
 }
 
@@ -221,7 +230,7 @@ private fun GuestsTab(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("ФИО/Организация") })
-        OutlinedTextField(value = room, onValueChange = { room = it }, label = { Text("Комната/Описание") })
+        OutlinedTextField(value = room, onValueChange = { room = it }, label = { Text("Номер/Описание") })
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
             TextField(
                 modifier = Modifier.menuAnchor(),

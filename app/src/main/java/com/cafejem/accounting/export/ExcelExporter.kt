@@ -2,6 +2,7 @@ package com.cafejem.accounting.export
 
 import android.content.Context
 import android.net.Uri
+import com.cafejem.accounting.data.Guest
 import com.cafejem.accounting.data.MealEntry
 import com.cafejem.accounting.data.MealType
 import com.cafejem.accounting.data.MonthlyExpense
@@ -18,6 +19,7 @@ class ExcelExporter {
         context: Context,
         targetUri: Uri,
         month: String,
+        guests: List<Guest>,
         entries: List<MealEntry>,
         ratesWithoutVat: Map<MealType, Double>,
         expenses: List<MonthlyExpense>,
@@ -26,13 +28,53 @@ class ExcelExporter {
     ) {
         context.contentResolver.openOutputStream(targetUri)?.use { out ->
             val wb = Workbook.createWorkbook(out)
-            val sheet = wb.createSheet("${month}_питание", 0)
+            val detailedSheet = wb.createSheet("${month}_по_номерам", 0)
+            val sheet = wb.createSheet("${month}_питание", 1)
 
             val rateB = ratesWithoutVat[MealType.BREAKFAST] ?: 0.0
             val rateL = ratesWithoutVat[MealType.LUNCH] ?: 0.0
             val rateD = ratesWithoutVat[MealType.DINNER] ?: 0.0
             val vatMultiplierMeals = 1 + (vatPercentForMeals / 100.0)
             val tax2Rate = 0.02
+            val guestById = guests.associateBy { it.id }
+
+            fun baseAmount(e: MealEntry): Double {
+                val rate = when (e.mealType) {
+                    MealType.BREAKFAST -> rateB
+                    MealType.LUNCH -> rateL
+                    MealType.DINNER -> rateD
+                }
+                return e.portions * rate
+            }
+
+            fun chargedAmount(e: MealEntry): Double {
+                val base = baseAmount(e)
+                return if (e.paymentType == PaymentType.WITH_VAT) base * vatMultiplierMeals else base
+            }
+
+            // Детальный лист для удобной сортировки: по номеру, дате, типу питания.
+            val detailHeaders = listOf("Номер", "Гость", "Дата", "Прием пищи", "Количество", "Тип оплаты", "Сумма")
+            detailHeaders.forEachIndexed { col, value -> detailedSheet.addCell(Label(col, 0, value)) }
+            val sortedEntries = entries.sortedWith(
+                compareBy<MealEntry>(
+                    { guestById[it.guestId]?.roomOrOrg.orEmpty() },
+                    { it.day },
+                    { it.mealType.name },
+                    { guestById[it.guestId]?.name.orEmpty() }
+                )
+            )
+            sortedEntries.forEachIndexed { index, e ->
+                val row = index + 1
+                val guest = guestById[e.guestId]
+                val day = e.day.toString().padStart(2, '0')
+                detailedSheet.addCell(Label(0, row, guest?.roomOrOrg.orEmpty()))
+                detailedSheet.addCell(Label(1, row, guest?.name ?: "Гость"))
+                detailedSheet.addCell(Label(2, row, "$month-$day"))
+                detailedSheet.addCell(Label(3, row, mealLabel(e.mealType)))
+                detailedSheet.addCell(Number(4, row, e.portions.toDouble()))
+                detailedSheet.addCell(Label(5, row, paymentLabel(e.paymentType)))
+                detailedSheet.addCell(Number(6, row, chargedAmount(e)))
+            }
 
             val yearMonth = YearMonth.parse(month)
             val days = yearMonth.lengthOfMonth()
@@ -58,20 +100,6 @@ class ExcelExporter {
             var roomAmount = 0.0       // без НДС (paymentType=WITHOUT_VAT)
             var additionalAmount = 0.0 // с НДС 22% (paymentType=WITH_VAT)
             var cashAmount = 0.0       // за наличные
-
-            fun baseAmount(e: MealEntry): Double {
-                val rate = when (e.mealType) {
-                    MealType.BREAKFAST -> rateB
-                    MealType.LUNCH -> rateL
-                    MealType.DINNER -> rateD
-                }
-                return e.portions * rate
-            }
-
-            fun chargedAmount(e: MealEntry): Double {
-                val base = baseAmount(e)
-                return if (e.paymentType == PaymentType.WITH_VAT) base * vatMultiplierMeals else base
-            }
 
             for (day in 1..days) {
                 val dayEntries = entriesByDay[day].orEmpty()
@@ -141,7 +169,7 @@ class ExcelExporter {
             sheet.addCell(Label(0, sectionStart + 4, "Общая сумма за питание за месяц"))
             sheet.addCell(Number(1, sectionStart + 4, roomAmount + additionalAmount + cashAmount))
 
-            val financeSheet = wb.createSheet("${month}_финансы", 1)
+            val financeSheet = wb.createSheet("${month}_финансы", 2)
             writeFinance(
                 sheet = financeSheet,
                 rateB = rateB,
@@ -203,5 +231,11 @@ class ExcelExporter {
         PaymentType.WITH_VAT -> "С НДС"
         PaymentType.WITHOUT_VAT -> "Без НДС"
         PaymentType.CASH -> "Наличные"
+    }
+
+    private fun mealLabel(mealType: MealType): String = when (mealType) {
+        MealType.BREAKFAST -> "Завтрак"
+        MealType.LUNCH -> "Обед"
+        MealType.DINNER -> "Ужин"
     }
 }
