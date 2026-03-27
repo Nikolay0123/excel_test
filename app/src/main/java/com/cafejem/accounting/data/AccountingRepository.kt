@@ -12,6 +12,14 @@ class AccountingRepository(private val dao: AppDao) {
         dao.upsertGuest(Guest(name = name, roomOrOrg = roomOrOrg, paymentType = paymentType))
     }
 
+    suspend fun updateGuest(id: Long, name: String, roomOrOrg: String, paymentType: PaymentType) {
+        dao.upsertGuest(Guest(id = id, name = name, roomOrOrg = roomOrOrg, paymentType = paymentType))
+    }
+
+    suspend fun deleteGuest(id: Long) {
+        dao.deleteGuest(id)
+    }
+
     suspend fun addEntry(
         guestId: Long,
         month: String,

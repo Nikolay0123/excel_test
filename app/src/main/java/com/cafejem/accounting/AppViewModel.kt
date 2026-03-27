@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cafejem.accounting.data.AccountingRepository
 import com.cafejem.accounting.data.Guest
+import com.cafejem.accounting.data.FinanceSetting
 import com.cafejem.accounting.data.GuestSummary
 import com.cafejem.accounting.data.MealEntry
 import com.cafejem.accounting.data.MonthlyExpense
@@ -41,10 +42,16 @@ class AppViewModel(
 
     private val _finance = MutableStateFlow<MonthlyFinance?>(null)
     val finance: StateFlow<MonthlyFinance?> = _finance
+    private val _rates = MutableStateFlow<Map<MealType, Double>>(emptyMap())
+    val rates: StateFlow<Map<MealType, Double>> = _rates
+    private val _financeSetting = MutableStateFlow(FinanceSetting())
+    val financeSetting: StateFlow<FinanceSetting> = _financeSetting
 
     init {
         viewModelScope.launch {
             repository.ensureDefaultRates()
+            _rates.value = repository.ratesMap()
+            _financeSetting.value = repository.financeSetting()
             refreshFinance()
         }
     }
@@ -57,6 +64,20 @@ class AppViewModel(
     fun addGuest(name: String, roomOrOrg: String, paymentType: PaymentType) {
         viewModelScope.launch {
             repository.addGuest(name, roomOrOrg, paymentType)
+            refreshFinance()
+        }
+    }
+
+    fun updateGuest(id: Long, name: String, roomOrOrg: String, paymentType: PaymentType) {
+        viewModelScope.launch {
+            repository.updateGuest(id, name, roomOrOrg, paymentType)
+            refreshFinance()
+        }
+    }
+
+    fun deleteGuest(id: Long) {
+        viewModelScope.launch {
+            repository.deleteGuest(id)
             refreshFinance()
         }
     }
@@ -117,6 +138,7 @@ class AppViewModel(
     fun updateRate(mealType: MealType, amountWithoutVat: Double) {
         viewModelScope.launch {
             repository.updateRate(mealType, amountWithoutVat)
+            _rates.value = repository.ratesMap()
             refreshFinance()
         }
     }
@@ -124,6 +146,7 @@ class AppViewModel(
     fun updateFinanceSetting(vatPercent: Double, taxPercent: Double) {
         viewModelScope.launch {
             repository.updateFinanceSetting(vatPercent, taxPercent)
+            _financeSetting.value = repository.financeSetting()
             refreshFinance()
         }
     }

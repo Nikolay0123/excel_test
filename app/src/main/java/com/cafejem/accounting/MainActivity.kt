@@ -2,7 +2,9 @@ package com.cafejem.accounting
 
 import android.os.Bundle
 import android.widget.Toast
+import android.content.Context
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -34,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +51,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cafejem.accounting.data.AccountingRepository
 import com.cafejem.accounting.data.AppDatabase
+import com.cafejem.accounting.data.FinanceSetting
 import com.cafejem.accounting.data.Guest
 import com.cafejem.accounting.data.GuestSummary
 import com.cafejem.accounting.data.MealEntry
@@ -83,16 +87,29 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 private fun MainScreen(viewModel: AppViewModel) {
     val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("cafe_jem_prefs", Context.MODE_PRIVATE) }
     val month by viewModel.currentMonth.collectAsStateWithLifecycle()
     val guests by viewModel.guests.collectAsStateWithLifecycle()
     val summary by viewModel.summary.collectAsStateWithLifecycle()
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val expenses by viewModel.expenses.collectAsStateWithLifecycle()
     val finance by viewModel.finance.collectAsStateWithLifecycle()
+    val rates by viewModel.rates.collectAsStateWithLifecycle()
+    val financeSetting by viewModel.financeSetting.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val exporter = remember { ExcelExporter() }
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Гости", "Ввод", "Финансы", "Итоги")
+
+    LaunchedEffect(Unit) {
+        val persistedMonth = prefs.getString("selected_month", null)
+        if (!persistedMonth.isNullOrBlank() && Regex("\\d{4}-\\d{2}").matches(persistedMonth)) {
+            viewModel.setMonth(persistedMonth)
+        }
+    }
+    LaunchedEffect(month) {
+        prefs.edit().putString("selected_month", month).apply()
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/vnd.ms-excel")
@@ -136,7 +153,12 @@ private fun MainScreen(viewModel: AppViewModel) {
             }
             Spacer(Modifier.height(8.dp))
             when (selectedTab) {
-                0 -> GuestsTab(guests = guests, onAddGuest = viewModel::addGuest)
+                0 -> GuestsTab(
+                    guests = guests,
+                    onAddGuest = viewModel::addGuest,
+                    onUpdateGuest = viewModel::updateGuest,
+                    onDeleteGuest = viewModel::deleteGuest
+                )
                 1 -> EntryTab(
                     guests = guests,
                     onAddEntry = viewModel::addEntry,
@@ -146,7 +168,9 @@ private fun MainScreen(viewModel: AppViewModel) {
                     onUpdateRate = viewModel::updateRate,
                     onUpdateSetting = viewModel::updateFinanceSetting,
                     onAddExpense = viewModel::addExpense,
-                    expenses = expenses
+                    expenses = expenses,
+                    rates = rates,
+                    financeSetting = financeSetting
                 )
                 else -> SummaryTab(
                     month = month,
@@ -174,12 +198,18 @@ private fun MonthSelector(month: String, onChange: (String) -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentType) -> Unit) {
+private fun GuestsTab(
+    guests: List<Guest>,
+    onAddGuest: (String, String, PaymentType) -> Unit,
+    onUpdateGuest: (Long, String, String, PaymentType) -> Unit,
+    onDeleteGuest: (Long) -> Unit
+) {
     var name by remember { mutableStateOf("") }
     var room by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     var payment by remember { mutableStateOf(PaymentType.WITH_VAT) }
+    var editingGuestId by remember { mutableStateOf<Long?>(null) }
     val trimmedQuery = search.trim()
     val filteredGuests = guests.filter {
         extractSurname(it.name).contains(trimmedQuery, ignoreCase = true)
@@ -209,11 +239,34 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
         }
         Button(onClick = {
             if (name.isNotBlank()) {
-                onAddGuest(name.trim(), room.trim(), payment)
+                if (editingGuestId == null) {
+                    onAddGuest(name.trim(), room.trim(), payment)
+                } else {
+                    onUpdateGuest(editingGuestId!!, name.trim(), room.trim(), payment)
+                }
                 name = ""
                 room = ""
+                payment = PaymentType.WITH_VAT
+                editingGuestId = null
             }
-        }) { Text("Добавить гостя") }
+        }) { Text(if (editingGuestId == null) "Добавить гостя" else "Сохранить гостя") }
+        if (editingGuestId != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    editingGuestId = null
+                    name = ""
+                    room = ""
+                    payment = PaymentType.WITH_VAT
+                }) { Text("Отмена") }
+                Button(onClick = {
+                    onDeleteGuest(editingGuestId!!)
+                    editingGuestId = null
+                    name = ""
+                    room = ""
+                    payment = PaymentType.WITH_VAT
+                }) { Text("Удалить") }
+            }
+        }
         OutlinedTextField(
             value = search,
             onValueChange = { search = it },
@@ -226,10 +279,22 @@ private fun GuestsTab(guests: List<Guest>, onAddGuest: (String, String, PaymentT
             onPick = { picked -> search = picked.name }
         )
         filteredGuests.forEach { guest ->
-            Card(Modifier.fillMaxWidth()) {
+            Card(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        editingGuestId = guest.id
+                        name = guest.name
+                        room = guest.roomOrOrg
+                        payment = guest.paymentType
+                    }
+            ) {
                 Column(Modifier.padding(10.dp)) {
                     Text(guest.name)
                     Text("${guest.roomOrOrg} | ${guest.paymentType.asLabel()}", style = MaterialTheme.typography.bodySmall)
+                    if (editingGuestId == guest.id) {
+                        Text("Нажмите 'Сохранить гостя' или 'Удалить'", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }
@@ -305,10 +370,18 @@ private fun EntryTab(
         }
 
         Text("Добавить питание за период")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = startDay, onValueChange = { startDay = it }, label = { Text("С дня") })
-            OutlinedTextField(value = endDay, onValueChange = { endDay = it }, label = { Text("По день") })
-        }
+        OutlinedTextField(
+            value = startDay,
+            onValueChange = { startDay = it },
+            label = { Text("С дня") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = endDay,
+            onValueChange = { endDay = it },
+            label = { Text("По день") },
+            modifier = Modifier.fillMaxWidth()
+        )
 
         Text("Выбор: питание в цене номера / доп. услуга")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -394,13 +467,15 @@ private fun FinanceTab(
     onUpdateRate: (MealType, Double) -> Unit,
     onUpdateSetting: (Double, Double) -> Unit,
     onAddExpense: (String, String, Double) -> Unit,
-    expenses: List<MonthlyExpense>
+    expenses: List<MonthlyExpense>,
+    rates: Map<MealType, Double>,
+    financeSetting: FinanceSetting
 ) {
-    var breakfast by remember { mutableStateOf("800") }
-    var lunch by remember { mutableStateOf("1000") }
-    var dinner by remember { mutableStateOf("850") }
-    var vat by remember { mutableStateOf("20") }
-    var tax by remember { mutableStateOf("15") }
+    var breakfast by remember(rates) { mutableStateOf((rates[MealType.BREAKFAST] ?: 800.0).toInt().toString()) }
+    var lunch by remember(rates) { mutableStateOf((rates[MealType.LUNCH] ?: 1000.0).toInt().toString()) }
+    var dinner by remember(rates) { mutableStateOf((rates[MealType.DINNER] ?: 850.0).toInt().toString()) }
+    var vat by remember(financeSetting.vatPercent) { mutableStateOf(financeSetting.vatPercent.toString()) }
+    var tax by remember(financeSetting.taxPercent) { mutableStateOf(financeSetting.taxPercent.toString()) }
     var expenseName by remember { mutableStateOf("") }
     var expenseAmount by remember { mutableStateOf("") }
     var channel by remember { mutableStateOf("Наличные") }
